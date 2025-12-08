@@ -4,9 +4,6 @@ import { OrbitControls, Sphere } from "@react-three/drei";
 import { TextureLoader } from "three";
 import type { RadioStation } from "../api/radio";
 
-// RadioStation type with optional coordinates
-
-// Props type
 type RadioGlobeProps = {
   radios: RadioStation[];
 };
@@ -44,6 +41,14 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     "https://upload.wikimedia.org/wikipedia/commons/0/04/Solarsystemscope_texture_8k_earth_daymap.jpg"
   );
 
+  // A few debug markers (fixed positions) so you can verify markers render
+  const debugMarkers: [number, number, number][] = [
+    [radius + 0.3, 0, 0],
+    [-(radius + 0.3), 0, 0],
+    [0, radius + 0.3, 0],
+    [0, -(radius + 0.3), 0],
+  ];
+
   return (
     <div style={{ width: "100vw", height: "100vh" }}>
       <Canvas camera={{ position: [0, 0, 12], fov: 50 }}>
@@ -55,12 +60,34 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           <meshStandardMaterial map={earthTexture} />
         </Sphere>
 
+        {/* Debug fixed markers to verify rendering */}
+        {debugMarkers.map((pos, i) => (
+          <mesh key={"debug-" + i} position={pos}>
+            <sphereGeometry args={[0.12, 12, 12]} />
+            <meshStandardMaterial
+              color={"yellow"}
+              emissive={"yellow"}
+              emissiveIntensity={0.6}
+              polygonOffset
+              polygonOffsetFactor={-1}
+              polygonOffsetUnits={1}
+            />
+          </mesh>
+        ))}
+
         {/* Radio dots */}
         {radios.map((station) => {
           const pos =
             station.latitude !== undefined && station.longitude !== undefined
-              ? latLngToXYZ(station.latitude, station.longitude, radius + 0.2)
+              ? latLngToXYZ(
+                  station.latitude,
+                  station.longitude,
+                  radius + 0.25
+                )
               : randomSpherePosition(radius);
+
+          // eslint-disable-next-line no-console
+          console.log("station pos:", station.name, station.stationuuid, pos);
 
           return (
             <mesh
@@ -68,19 +95,22 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
               position={pos}
               onClick={() => setCurrentStation(station)}
             >
-              <sphereGeometry args={[0.5, 16, 16]} />
+              <sphereGeometry args={[0.12, 12, 12]} />
               <meshStandardMaterial
                 color={
                   currentStation?.stationuuid === station.stationuuid
-                    ? "green"
+                    ? "lime"
                     : "red"
                 }
                 emissive={
                   currentStation?.stationuuid === station.stationuuid
-                    ? "darkgreen"
+                    ? "limegreen"
                     : "darkred"
                 }
-                emissiveIntensity={0.3}
+                emissiveIntensity={0.8}
+                polygonOffset
+                polygonOffsetFactor={-1}
+                polygonOffsetUnits={1}
               />
             </mesh>
           );
