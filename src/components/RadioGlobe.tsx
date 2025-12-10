@@ -4,7 +4,7 @@ import { OrbitControls, Sphere } from "@react-three/drei";
 import { TextureLoader } from "three";
 import type { RadioStation } from "../api/radio";
 
-// RadioStation type with optional coordinates
+// RadioStation type with required coordinates
 
 // Props type
 type RadioGlobeProps = {
@@ -13,20 +13,13 @@ type RadioGlobeProps = {
 
 // Convert lat/lng to 3D XYZ position on sphere
 function latLngToXYZ(lat: number, lng: number, radius: number) {
-  const phi = lat * (Math.PI / 180); // latitude in radians
-  const theta = lng * (Math.PI / 180); // longitude in radians
-  const x = radius * Math.cos(phi) * Math.cos(theta);
-  const y = radius * Math.sin(phi);
-  const z = radius * Math.cos(phi) * Math.sin(theta);
-  return [x, y, z] as [number, number, number];
-}
+  const phi = (90 - lat) * (Math.PI / 180);
+  const theta = (lng + 180) * (Math.PI / 180);
 
-function randomSpherePosition(radius: number) {
-  const phi = Math.acos(2 * Math.random() - 1); // latitude from -90 to 90
-  const theta = 2 * Math.PI * Math.random(); // longitude from 0 to 360
-  const x = (radius + 0.1) * Math.sin(phi) * Math.cos(theta);
-  const y = (radius + 0.1) * Math.cos(phi);
-  const z = (radius + 0.1) * Math.sin(phi) * Math.sin(theta);
+  const x = -radius * Math.sin(phi) * Math.cos(theta);
+  const y = radius * Math.cos(phi);
+  const z = radius * Math.sin(phi) * Math.sin(theta);
+
   return [x, y, z] as [number, number, number];
 }
 
@@ -54,9 +47,12 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          flexDirection: "column",
         }}
       >
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-4"></div>
         <h1>Loading radio stations...</h1>
+        <p className="text-gray-400 mt-2">Fetching from radio-browser.info</p>
       </div>
     );
   }
@@ -74,11 +70,11 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
 
         {/* Radio dots */}
         {radios.map((station) => {
-          const hasCoords =
-            station.latitude !== undefined && station.longitude !== undefined;
-          const pos = hasCoords
-            ? latLngToXYZ(station.latitude!, station.longitude!, radius + 0.1)
-            : randomSpherePosition(radius);
+          const pos = latLngToXYZ(
+            station.latitude!,
+            station.longitude!,
+            radius + 0.1
+          );
 
           return (
             <mesh
@@ -86,21 +82,17 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
               position={pos}
               onClick={() => setCurrentStation(station)}
             >
-              <sphereGeometry args={[hasCoords ? 0.08 : 0.05, 8, 8]} />
+              <sphereGeometry args={[0.08, 8, 8]} />
               <meshStandardMaterial
                 color={
                   currentStation?.stationuuid === station.stationuuid
                     ? "yellow"
-                    : hasCoords
-                    ? "cyan"
-                    : "orange"
+                    : "cyan"
                 }
                 emissive={
                   currentStation?.stationuuid === station.stationuuid
                     ? "gold"
-                    : hasCoords
-                    ? "darkcyan"
-                    : "darkorange"
+                    : "darkcyan"
                 }
                 emissiveIntensity={0.5}
               />

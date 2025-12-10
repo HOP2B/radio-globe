@@ -7,11 +7,25 @@ import RadioGlobe from "./components/RadioGlobe";
 
 export default function App() {
   const [radios, setRadios] = useState<RadioStation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadRadios = async () => {
-      const data = await fetchRadios();
-      setRadios(data);
+      console.log("Starting to load radios...");
+      try {
+        const data = await fetchRadios();
+        console.log("Fetched radios:", data.length);
+        setRadios(data);
+      } catch (err) {
+        console.error("Error loading radios:", err);
+        setError(
+          err instanceof Error ? err.message : "Failed to load radio stations"
+        );
+      } finally {
+        console.log("Setting loading to false");
+        setLoading(false);
+      }
     };
 
     loadRadios();
