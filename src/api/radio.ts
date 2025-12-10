@@ -136,6 +136,10 @@ export interface RadioStation {
   city: string;
   latitude: number;
   longitude: number;
+  language?: string;
+  bitrate?: number;
+  codec?: string;
+  votes?: number;
 }
 
 export const fetchRadios = async (): Promise<RadioStation[]> => {

@@ -1,10 +1,9 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useState } from "react";
 import { Canvas, useLoader } from "@react-three/fiber";
 import { OrbitControls, Sphere } from "@react-three/drei";
 import { TextureLoader } from "three";
 import type { RadioStation } from "../api/radio";
-
-// RadioStation type with required coordinates
 
 // Props type
 type RadioGlobeProps = {
@@ -27,6 +26,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   const [currentStation, setCurrentStation] = useState<RadioStation | null>(
     null
   );
+  const [audioRef, setAudioRef] = useState<HTMLAudioElement | null>(null);
   const radius = 5;
 
   // Load Earth texture
@@ -80,9 +80,15 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
             <mesh
               key={station.stationuuid}
               position={pos}
-              onClick={() => setCurrentStation(station)}
+              onClick={() => {
+                // Stop previous audio if playing
+                if (audioRef && !audioRef.paused) {
+                  audioRef.pause();
+                }
+                setCurrentStation(station);
+              }}
             >
-              <sphereGeometry args={[0.08, 8, 8]} />
+              <sphereGeometry args={[0.04, 8, 8]} />
               <meshStandardMaterial
                 color={
                   currentStation?.stationuuid === station.stationuuid
@@ -100,7 +106,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           );
         })}
 
-        <OrbitControls enableZoom />
+        <OrbitControls enableZoom={true} enablePan={false} />
       </Canvas>
 
       {/* Radio count display */}
@@ -110,38 +116,146 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           top: 20,
           left: 20,
           color: "white",
-          background: "rgba(0,0,0,0.7)",
-          padding: "10px",
-          borderRadius: "5px",
+          background: "rgba(0,0,0,0.8)",
+          padding: "12px 16px",
+          borderRadius: "8px",
+          border: "1px solid rgba(255,255,255,0.1)",
+          fontSize: "14px",
+          fontWeight: "500",
+          backdropFilter: "blur(10px)",
         }}
       >
-        Radio Stations: {radios.length}
+        📻 {radios.length} Stations
       </div>
 
-      {/* Audio player */}
+      {/* Left panel for selected station - Radio Garden style */}
       {currentStation && (
         <div
           style={{
             position: "absolute",
-            bottom: 20,
             left: 20,
+            top: "50%",
+            transform: "translateY(-50%)",
+            width: 300,
+            background: "rgba(0,0,0,0.85)",
+            borderRadius: "12px",
+            padding: "20px",
             color: "white",
-            background: "rgba(0,0,0,0.7)",
-            padding: "10px",
-            borderRadius: "5px",
-            maxWidth: "300px",
+            backdropFilter: "blur(10px)",
+            border: "1px solid rgba(255,255,255,0.15)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
           }}
         >
-          <h3>Selected: {currentStation.name}</h3>
-          <p>
-            {currentStation.country} - {currentStation.city}
-          </p>
-          <audio
-            src={currentStation.url}
-            controls
-            onError={(e) => console.error("Audio error:", e)}
-            style={{ width: "100%" }}
-          />
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "15px",
+            }}
+          >
+            <h2 style={{ fontSize: "18px", fontWeight: "600" }}>
+              {currentStation.name}
+            </h2>
+            <button
+              onClick={() => setCurrentStation(null)}
+              style={{
+                background: "rgba(255,255,255,0.1)",
+                border: "none",
+                color: "white",
+                width: "24px",
+                height: "24px",
+                borderRadius: "50%",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "16px",
+              }}
+            >
+              ×
+            </button>
+          </div>
+
+          <div style={{ marginBottom: "15px" }}>
+            <p style={{ fontSize: "14px", color: "#aaa", marginBottom: "4px" }}>
+              Country
+            </p>
+            <p style={{ fontSize: "16px", fontWeight: "500" }}>
+              {currentStation.country}
+            </p>
+          </div>
+
+          {currentStation.city && (
+            <div style={{ marginBottom: "15px" }}>
+              <p
+                style={{ fontSize: "14px", color: "#aaa", marginBottom: "4px" }}
+              >
+                City
+              </p>
+              <p style={{ fontSize: "16px", fontWeight: "500" }}>
+                {currentStation.city}
+              </p>
+            </div>
+          )}
+
+          <div style={{ marginBottom: "15px" }}>
+            <p style={{ fontSize: "14px", color: "#aaa", marginBottom: "4px" }}>
+              Language
+            </p>
+            <p style={{ fontSize: "16px", fontWeight: "500" }}>
+              {currentStation.language || "N/A"}
+            </p>
+          </div>
+
+          <div style={{ marginBottom: "15px" }}>
+            <p style={{ fontSize: "14px", color: "#aaa", marginBottom: "4px" }}>
+              Bitrate
+            </p>
+            <p style={{ fontSize: "16px", fontWeight: "500" }}>
+              {currentStation.bitrate || "N/A"} kbps
+            </p>
+          </div>
+
+          <div style={{ marginBottom: "15px" }}>
+            <p style={{ fontSize: "14px", color: "#aaa", marginBottom: "4px" }}>
+              Codec
+            </p>
+            <p style={{ fontSize: "16px", fontWeight: "500" }}>
+              {currentStation.codec || "N/A"}
+            </p>
+          </div>
+
+          <div style={{ marginBottom: "15px" }}>
+            <p style={{ fontSize: "14px", color: "#aaa", marginBottom: "4px" }}>
+              Votes
+            </p>
+            <p style={{ fontSize: "16px", fontWeight: "500" }}>
+              {currentStation.votes || 0}
+            </p>
+          </div>
+
+          <div
+            style={{
+              marginTop: "20px",
+              paddingTop: "20px",
+              borderTop: "1px solid rgba(255,255,255,0.1)",
+            }}
+          >
+            <audio
+              ref={(audio) => {
+                if (audio && currentStation) {
+                  audio.src = currentStation.url;
+                  audio
+                    .play()
+                    .catch((e) => console.log("Auto-play prevented:", e));
+                }
+              }}
+              controls
+              onError={(e) => console.error("Audio error:", e)}
+              style={{ width: "100%" }}
+            />
+          </div>
         </div>
       )}
     </div>
