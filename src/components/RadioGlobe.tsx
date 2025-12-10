@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { useState } from "react";
-import { Canvas, useLoader } from "@react-three/fiber";
+import { Canvas, useLoader, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Sphere } from "@react-three/drei";
-import { TextureLoader } from "three";
+import { TextureLoader, Camera } from "three";
 import type { RadioStation } from "../api/radio";
 
 // Props type
@@ -20,6 +20,56 @@ function latLngToXYZ(lat: number, lng: number, radius: number) {
   const z = radius * Math.sin(phi) * Math.sin(theta);
 
   return [x, y, z] as [number, number, number];
+}
+
+// Component for radio dots with dynamic sizing
+function RadioDot({
+  position,
+  station,
+  currentStation,
+  onClick,
+}: {
+  position: [number, number, number];
+  station: RadioStation;
+  currentStation: RadioStation | null;
+  onClick: () => void;
+}) {
+  const { camera } = useThree();
+  const [size, setSize] = useState(0.04);
+
+  // Update size based on camera distance
+  useFrame(() => {
+    if (camera) {
+      const distance = camera.position.distanceTo({ x: 0, y: 0, z: 0 });
+      // Smaller when zoomed in (closer to earth)
+      // Larger when zoomed out (farther from earth)
+      const baseSize = 0.04;
+      const minSize = 0.01;
+      const maxSize = 0.06;
+      const normalizedDistance = Math.max(0, Math.min(1, (distance - 6) / 10));
+      const newSize = baseSize * (0.3 + 0.7 * normalizedDistance);
+      setSize(newSize);
+    }
+  });
+
+  return (
+    <mesh position={position} onClick={onClick}>
+      <sphereGeometry args={[size, 8, 8]} />
+      <meshStandardMaterial
+        color={
+          currentStation?.stationuuid === station.stationuuid
+            ? "yellow"
+            : "cyan"
+        }
+        emissive={
+          currentStation?.stationuuid === station.stationuuid
+            ? "gold"
+            : "darkcyan"
+        }
+        emissiveIntensity={0.5}
+      />
+    </mesh>
+  );
 }
 
 export default function RadioGlobe({ radios }: RadioGlobeProps) {
@@ -68,7 +118,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           <meshStandardMaterial map={earthTexture} />
         </Sphere>
 
-        {/* Radio dots */}
+        {/* Radio dots - size scales with zoom */}
         {radios.map((station) => {
           const pos = latLngToXYZ(
             station.latitude!,
@@ -77,9 +127,11 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           );
 
           return (
-            <mesh
+            <RadioDot
               key={station.stationuuid}
               position={pos}
+              station={station}
+              currentStation={currentStation}
               onClick={() => {
                 // Stop previous audio if playing
                 if (audioRef && !audioRef.paused) {
@@ -87,26 +139,16 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                 }
                 setCurrentStation(station);
               }}
-            >
-              <sphereGeometry args={[0.04, 8, 8]} />
-              <meshStandardMaterial
-                color={
-                  currentStation?.stationuuid === station.stationuuid
-                    ? "yellow"
-                    : "cyan"
-                }
-                emissive={
-                  currentStation?.stationuuid === station.stationuuid
-                    ? "gold"
-                    : "darkcyan"
-                }
-                emissiveIntensity={0.5}
-              />
-            </mesh>
+            />
           );
         })}
 
-        <OrbitControls enableZoom={true} enablePan={false} />
+        <OrbitControls
+          enableZoom={true}
+          enablePan={false}
+          minDistance={radius + 1}
+          maxDistance={radius + 20}
+        />
       </Canvas>
 
       {/* Radio count display */}
@@ -128,117 +170,59 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         📻 {radios.length} Stations
       </div>
 
-      {/* Left panel for selected station - Radio Garden style */}
+      {/* Spotify-like player panel */}
       {currentStation && (
         <div
           style={{
             position: "absolute",
             left: 20,
-            top: "50%",
-            transform: "translateY(-50%)",
+            bottom: 20,
             width: 300,
-            background: "rgba(0,0,0,0.85)",
+            background: "rgba(0,0,0,0.9)",
             borderRadius: "12px",
             padding: "20px",
             color: "white",
             backdropFilter: "blur(10px)",
             border: "1px solid rgba(255,255,255,0.15)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "15px",
-            }}
-          >
-            <h2 style={{ fontSize: "18px", fontWeight: "600" }}>
-              {currentStation.name}
-            </h2>
-            <button
-              onClick={() => setCurrentStation(null)}
+          {/* Radio name - big green text like Spotify */}
+          <div style={{ marginBottom: "10px" }}>
+            <h1
               style={{
-                background: "rgba(255,255,255,0.1)",
-                border: "none",
-                color: "white",
-                width: "24px",
-                height: "24px",
-                borderRadius: "50%",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "16px",
+                fontSize: "24px",
+                fontWeight: "700",
+                color: "#1DB954",
+                margin: "0",
+                lineHeight: "1.2",
+                letterSpacing: "-0.02em",
               }}
             >
-              ×
-            </button>
+              {currentStation.name}
+            </h1>
           </div>
 
-          <div style={{ marginBottom: "15px" }}>
-            <p style={{ fontSize: "14px", color: "#aaa", marginBottom: "4px" }}>
-              Country
-            </p>
-            <p style={{ fontSize: "16px", fontWeight: "500" }}>
+          {/* City and country - small white text */}
+          <div style={{ marginBottom: "20px" }}>
+            <p
+              style={{
+                fontSize: "14px",
+                color: "rgba(255,255,255,0.8)",
+                margin: "0",
+                fontWeight: "400",
+              }}
+            >
+              {currentStation.city ? `${currentStation.city}, ` : ""}
               {currentStation.country}
             </p>
           </div>
 
-          {currentStation.city && (
-            <div style={{ marginBottom: "15px" }}>
-              <p
-                style={{ fontSize: "14px", color: "#aaa", marginBottom: "4px" }}
-              >
-                City
-              </p>
-              <p style={{ fontSize: "16px", fontWeight: "500" }}>
-                {currentStation.city}
-              </p>
-            </div>
-          )}
-
-          <div style={{ marginBottom: "15px" }}>
-            <p style={{ fontSize: "14px", color: "#aaa", marginBottom: "4px" }}>
-              Language
-            </p>
-            <p style={{ fontSize: "16px", fontWeight: "500" }}>
-              {currentStation.language || "N/A"}
-            </p>
-          </div>
-
-          <div style={{ marginBottom: "15px" }}>
-            <p style={{ fontSize: "14px", color: "#aaa", marginBottom: "4px" }}>
-              Bitrate
-            </p>
-            <p style={{ fontSize: "16px", fontWeight: "500" }}>
-              {currentStation.bitrate || "N/A"} kbps
-            </p>
-          </div>
-
-          <div style={{ marginBottom: "15px" }}>
-            <p style={{ fontSize: "14px", color: "#aaa", marginBottom: "4px" }}>
-              Codec
-            </p>
-            <p style={{ fontSize: "16px", fontWeight: "500" }}>
-              {currentStation.codec || "N/A"}
-            </p>
-          </div>
-
-          <div style={{ marginBottom: "15px" }}>
-            <p style={{ fontSize: "14px", color: "#aaa", marginBottom: "4px" }}>
-              Votes
-            </p>
-            <p style={{ fontSize: "16px", fontWeight: "500" }}>
-              {currentStation.votes || 0}
-            </p>
-          </div>
-
+          {/* Audio player controls */}
           <div
             style={{
-              marginTop: "20px",
-              paddingTop: "20px",
+              marginTop: "10px",
+              paddingTop: "15px",
               borderTop: "1px solid rgba(255,255,255,0.1)",
             }}
           >
