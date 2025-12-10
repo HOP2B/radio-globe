@@ -6,8 +6,8 @@ export interface RadioStation {
   favicon: string;
   country: string;
   city: string;
-  latitude: number;
-  longitude: number;
+  latitude?: number;
+  longitude?: number;
 }
 
 export const fetchRadios = async (): Promise<RadioStation[]> => {
@@ -15,15 +15,14 @@ export const fetchRadios = async (): Promise<RadioStation[]> => {
     const res = await fetch("https://de1.api.radio-browser.info/json/stations");
     const radios = await res.json();
 
-    // filter to only stations with lat/lon and map to ensure numbers
+    // Map all stations, parse lat/lon if available
     return radios
-      .filter((r: any) => r.latitude != null && r.longitude != null)
       .map((r: any) => ({
         ...r,
-        latitude: parseFloat(r.latitude),
-        longitude: parseFloat(r.longitude),
+        latitude: r.latitude != null ? parseFloat(r.latitude) : undefined,
+        longitude: r.longitude != null ? parseFloat(r.longitude) : undefined,
       }))
-      .slice(0, 200); // limit to first 200 for performance
+      .slice(0, 500); // limit to first 500 for performance
   } catch (err) {
     console.error("Failed to fetch radios:", err);
     return [];

@@ -57,10 +57,11 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
 
         {/* Radio dots */}
         {radios.map((station) => {
-          const pos =
-            station.latitude !== undefined && station.longitude !== undefined
-              ? latLngToXYZ(station.latitude, station.longitude, radius + 0.2)
-              : randomSpherePosition(radius);
+          const hasCoords =
+            station.latitude !== undefined && station.longitude !== undefined;
+          const pos = hasCoords
+            ? latLngToXYZ(station.latitude!, station.longitude!, radius + 0.1)
+            : randomSpherePosition(radius);
 
           return (
             <mesh
@@ -68,19 +69,23 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
               position={pos}
               onClick={() => setCurrentStation(station)}
             >
-              <sphereGeometry args={[0.5, 16, 16]} />
+              <sphereGeometry args={[hasCoords ? 0.08 : 0.05, 8, 8]} />
               <meshStandardMaterial
                 color={
                   currentStation?.stationuuid === station.stationuuid
-                    ? "green"
-                    : "red"
+                    ? "yellow"
+                    : hasCoords
+                    ? "cyan"
+                    : "orange"
                 }
                 emissive={
                   currentStation?.stationuuid === station.stationuuid
-                    ? "darkgreen"
-                    : "darkred"
+                    ? "gold"
+                    : hasCoords
+                    ? "darkcyan"
+                    : "darkorange"
                 }
-                emissiveIntensity={0.3}
+                emissiveIntensity={0.5}
               />
             </mesh>
           );
@@ -107,10 +112,27 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       {/* Audio player */}
       {currentStation && (
         <div
-          style={{ position: "absolute", bottom: 20, left: 20, color: "white" }}
+          style={{
+            position: "absolute",
+            bottom: 20,
+            left: 20,
+            color: "white",
+            background: "rgba(0,0,0,0.7)",
+            padding: "10px",
+            borderRadius: "5px",
+            maxWidth: "300px",
+          }}
         >
-          <h3>Playing: {currentStation.name}</h3>
-          <audio src={currentStation.url} autoPlay controls />
+          <h3>Selected: {currentStation.name}</h3>
+          <p>
+            {currentStation.country} - {currentStation.city}
+          </p>
+          <audio
+            src={currentStation.url}
+            controls
+            onError={(e) => console.error("Audio error:", e)}
+            style={{ width: "100%" }}
+          />
         </div>
       )}
     </div>
