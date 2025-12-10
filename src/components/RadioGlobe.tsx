@@ -13,26 +13,24 @@ type RadioGlobeProps = {
 
 // Convert lat/lng to 3D XYZ position on sphere
 function latLngToXYZ(lat: number, lng: number, radius: number) {
-  const phi = (90 - lat) * (Math.PI / 180);
-  const theta = (lng + 180) * (Math.PI / 180);
-  const x = -radius * Math.sin(phi) * Math.cos(theta);
-  const y = radius * Math.cos(phi);
-  const z = radius * Math.sin(phi) * Math.sin(theta);
+  const phi = lat * (Math.PI / 180); // latitude in radians
+  const theta = lng * (Math.PI / 180); // longitude in radians
+  const x = radius * Math.cos(phi) * Math.cos(theta);
+  const y = radius * Math.sin(phi);
+  const z = radius * Math.cos(phi) * Math.sin(theta);
   return [x, y, z] as [number, number, number];
 }
 
-// Generate random position on the sphere for stations without lat/lng
 function randomSpherePosition(radius: number) {
-  const phi = Math.acos(2 * Math.random() - 1);
-  const theta = 2 * Math.PI * Math.random();
-  const x = (radius + 0.2) * Math.sin(phi) * Math.cos(theta); // offset outside
-  const y = (radius + 0.2) * Math.cos(phi);
-  const z = (radius + 0.2) * Math.sin(phi) * Math.sin(theta);
+  const phi = Math.acos(2 * Math.random() - 1); // latitude from -90 to 90
+  const theta = 2 * Math.PI * Math.random(); // longitude from 0 to 360
+  const x = (radius + 0.1) * Math.sin(phi) * Math.cos(theta);
+  const y = (radius + 0.1) * Math.cos(phi);
+  const z = (radius + 0.1) * Math.sin(phi) * Math.sin(theta);
   return [x, y, z] as [number, number, number];
 }
 
 export default function RadioGlobe({ radios }: RadioGlobeProps) {
-  console.log("RadioGlobe received", radios.length, "radios");
   const [currentStation, setCurrentStation] = useState<RadioStation | null>(
     null
   );
@@ -43,6 +41,25 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     TextureLoader,
     "https://upload.wikimedia.org/wikipedia/commons/0/04/Solarsystemscope_texture_8k_earth_daymap.jpg"
   );
+
+  // If no radios loaded yet, show loading
+  if (radios.length === 0) {
+    return (
+      <div
+        style={{
+          width: "100vw",
+          height: "100vh",
+          background: "black",
+          color: "white",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <h1>Loading radio stations...</h1>
+      </div>
+    );
+  }
 
   return (
     <div style={{ width: "100vw", height: "100vh" }}>
