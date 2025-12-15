@@ -176,8 +176,9 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
               currentStation={currentStation}
               onClick={() => {
                 // Stop previous audio if playing
-                if (audioRef && !audioRef.paused) {
-                  audioRef.pause();
+                const currentAudio = audioRefObj.current;
+                if (currentAudio && !currentAudio.paused) {
+                  currentAudio.pause();
                 }
                 setCurrentStation(station);
               }}
