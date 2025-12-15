@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Canvas, useLoader, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Sphere } from "@react-three/drei";
 import { TextureLoader, Camera, Vector3 } from "three";
@@ -30,16 +30,18 @@ function RadioDot({
   station,
   currentStation,
   onClick,
+  isUnavailable,
 }: {
   position: [number, number, number];
   station: RadioStation;
   currentStation: RadioStation | null;
   onClick: () => void;
+  isUnavailable: boolean;
 }) {
   const { camera } = useThree();
   const [size, setSize] = useState(0.04);
 
-  // Update size based on camera distance
+  // Update size based on camera distance and selection
   useFrame(() => {
     if (camera) {
       const distance = camera.position.distanceTo({ x: 0, y: 0, z: 0 });
@@ -49,7 +51,13 @@ function RadioDot({
       const minSize = 0.01;
       const maxSize = 0.06;
       const normalizedDistance = Math.max(0, Math.min(1, (distance - 6) / 10));
-      const newSize = baseSize * (0.3 + 0.7 * normalizedDistance);
+      let newSize = baseSize * (0.3 + 0.7 * normalizedDistance);
+
+      // Make bigger and yellow when selected
+      if (currentStation?.stationuuid === station.stationuuid) {
+        newSize *= 2; // Double the size when selected
+      }
+
       setSize(newSize);
     }
   });
@@ -61,11 +69,15 @@ function RadioDot({
         color={
           currentStation?.stationuuid === station.stationuuid
             ? "yellow"
+            : isUnavailable
+            ? "red"
             : "cyan"
         }
         emissive={
           currentStation?.stationuuid === station.stationuuid
             ? "gold"
+            : isUnavailable
+            ? "darkred"
             : "darkcyan"
         }
         emissiveIntensity={0.5}
@@ -79,6 +91,15 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     null
   );
   const [audioRef, setAudioRef] = useState<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [volume, setVolume] = useState(0.7);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const [unavailableStations, setUnavailableStations] = useState<Set<string>>(
+    new Set()
+  );
   const [showLikeMenu, setShowLikeMenu] = useState(false); // Hide menu by default
   const [menuAnimation, setMenuAnimation] = useState("slide-in");
   const [isBalloonRiding, setIsBalloonRiding] = useState(false);
@@ -88,6 +109,48 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   const controlsRef = useRef<any>(null);
   const cameraRef = useRef<any>(null);
   const radius = 5;
+
+  // Handle audio setup when station changes
+  useEffect(() => {
+    if (audioRef && currentStation) {
+      audioRef.src = currentStation.url;
+      audioRef.volume = volume;
+      if (isPlaying) {
+        audioRef.play().catch((e) => {
+          console.log("Auto-play prevented:", e);
+          setIsPlaying(false);
+        });
+      }
+    }
+  }, [currentStation, audioRef]);
+
+  // Handle play/pause state changes
+  useEffect(() => {
+    if (audioRef && currentStation) {
+      if (isPlaying) {
+        audioRef.play().catch((e) => {
+          console.log("Play prevented:", e);
+          setIsPlaying(false);
+        });
+      } else {
+        audioRef.pause();
+      }
+    }
+  }, [isPlaying, audioRef, currentStation]);
+
+  // Handle volume changes
+  useEffect(() => {
+    if (audioRef) {
+      audioRef.volume = volume;
+    }
+  }, [volume, audioRef]);
+
+  // Format time in MM:SS format
+  const formatTime = (time: number) => {
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  };
 
   // Smooth zoom-out animation
   const ZoomAnimation = () => {
@@ -174,13 +237,21 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
               position={pos}
               station={station}
               currentStation={currentStation}
+              isUnavailable={unavailableStations.has(station.stationuuid)}
               onClick={() => {
+                if (unavailableStations.has(station.stationuuid)) {
+                  // Show message for unavailable station
+                  alert(`❌ ${station.name} is currently unavailable`);
+                  return;
+                }
                 // Stop previous audio if playing
                 const currentAudio = audioRefObj.current;
                 if (currentAudio && !currentAudio.paused) {
                   currentAudio.pause();
                 }
+                setAudioEnabled(true);
                 setCurrentStation(station);
+                setIsPlaying(true);
               }}
             />
           );
@@ -391,7 +462,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
             </p>
           </div>
 
-          {/* Audio player controls */}
+          {/* Custom Audio Controls */}
           <div
             style={{
               marginTop: "10px",
@@ -399,22 +470,261 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
               borderTop: "1px solid rgba(255,255,255,0.1)",
             }}
           >
+            {/* Hidden audio element */}
             <audio
-              ref={(audio) => {
-                if (audio && currentStation) {
-                  audio.src = currentStation.url;
-                  audio
-                    .play()
-                    .catch((e) => console.log("Auto-play prevented:", e));
+              ref={(audio) => setAudioRef(audio)}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+              onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+              onLoadStart={() => setIsLoading(true)}
+              onCanPlay={() => setIsLoading(false)}
+              onError={(e) => {
+                console.error("Audio error:", e);
+                setIsPlaying(false);
+                setIsLoading(false);
+                if (currentStation) {
+                  setUnavailableStations(
+                    (prev) => new Set([...prev, currentStation.stationuuid])
+                  );
                 }
               }}
-              controls
-              onError={(e) => console.error("Audio error:", e)}
-              style={{ width: "100%" }}
+              style={{ display: "none" }}
             />
+
+            {/* Progress Bar */}
+            <div style={{ marginBottom: "15px" }}>
+              <input
+                type="range"
+                min="0"
+                max={duration || 100}
+                value={currentTime}
+                onChange={(e) => {
+                  const newTime = parseFloat(e.target.value);
+                  setCurrentTime(newTime);
+                  if (audioRef) {
+                    audioRef.currentTime = newTime;
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  height: "4px",
+                  borderRadius: "2px",
+                  background: "rgba(255,255,255,0.2)",
+                  outline: "none",
+                  cursor: "pointer",
+                  appearance: "none",
+                  WebkitAppearance: "none",
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginTop: "5px",
+                  fontSize: "12px",
+                  color: "rgba(255,255,255,0.6)",
+                }}
+              >
+                <span>{formatTime(currentTime)}</span>
+                <span>{formatTime(duration)}</span>
+              </div>
+            </div>
+
+            {/* Control Buttons */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "10px",
+                marginBottom: "15px",
+              }}
+            >
+              {/* Skip Backward */}
+              <button
+                onClick={() => {
+                  if (audioRef) {
+                    audioRef.currentTime = Math.max(
+                      0,
+                      audioRef.currentTime - 15
+                    );
+                  }
+                }}
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "50%",
+                  background: "rgba(255,255,255,0.1)",
+                  border: "none",
+                  color: "white",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "12px",
+                  transition: "all 0.2s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.2)";
+                  e.currentTarget.style.transform = "scale(1.05)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+                  e.currentTarget.style.transform = "scale(1)";
+                }}
+              >
+                ⏪
+              </button>
+
+              {/* Play/Pause Button */}
+              <button
+                onClick={() => {
+                  if (!audioEnabled) {
+                    setAudioEnabled(true);
+                  }
+                  if (audioRef) {
+                    if (isPlaying) {
+                      audioRef.pause();
+                      setIsPlaying(false);
+                    } else {
+                      audioRef
+                        .play()
+                        .catch((e) => console.log("Play prevented:", e));
+                      setIsPlaying(true);
+                    }
+                  }
+                }}
+                disabled={isLoading}
+                style={{
+                  width: "48px",
+                  height: "48px",
+                  borderRadius: "50%",
+                  background: isLoading ? "rgba(255,255,255,0.2)" : "#1DB954",
+                  border: "none",
+                  color: "white",
+                  cursor: isLoading ? "not-allowed" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "18px",
+                  transition: "all 0.2s ease",
+                  boxShadow: isLoading
+                    ? "none"
+                    : "0 4px 12px rgba(29, 185, 84, 0.4)",
+                }}
+                onMouseEnter={(e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.transform = "scale(1.05)";
+                    e.currentTarget.style.boxShadow =
+                      "0 6px 16px rgba(29, 185, 84, 0.5)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.transform = "scale(1)";
+                    e.currentTarget.style.boxShadow =
+                      "0 4px 12px rgba(29, 185, 84, 0.4)";
+                  }
+                }}
+              >
+                {isLoading ? "⏳" : isPlaying ? "⏸️" : "▶️"}
+              </button>
+
+              {/* Skip Forward */}
+              <button
+                onClick={() => {
+                  if (audioRef) {
+                    audioRef.currentTime = Math.min(
+                      duration,
+                      audioRef.currentTime + 15
+                    );
+                  }
+                }}
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "50%",
+                  background: "rgba(255,255,255,0.1)",
+                  border: "none",
+                  color: "white",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "12px",
+                  transition: "all 0.2s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.2)";
+                  e.currentTarget.style.transform = "scale(1.05)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+                  e.currentTarget.style.transform = "scale(1)";
+                }}
+              >
+                ⏩
+              </button>
+            </div>
+
+            {/* Volume Control */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span
+                style={{ fontSize: "14px", color: "rgba(255,255,255,0.7)" }}
+              >
+                {volume === 0 ? "🔇" : volume < 0.5 ? "🔉" : "🔊"}
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={volume}
+                onChange={(e) => {
+                  const newVolume = parseFloat(e.target.value);
+                  setVolume(newVolume);
+                  if (audioRef) {
+                    audioRef.volume = newVolume;
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  height: "4px",
+                  borderRadius: "2px",
+                  background: "rgba(255,255,255,0.2)",
+                  outline: "none",
+                  cursor: "pointer",
+                  appearance: "none",
+                  WebkitAppearance: "none",
+                }}
+              />
+            </div>
           </div>
         </div>
       )}
+
+      {/* Enjoy Project Text */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 20,
+          right: 20,
+          color: "white",
+          background: "rgba(0,0,0,0.8)",
+          padding: "8px 12px",
+          borderRadius: "6px",
+          border: "1px solid rgba(255,255,255,0.1)",
+          fontSize: "12px",
+          fontWeight: "400",
+          backdropFilter: "blur(10px)",
+          textAlign: "center",
+        }}
+      >
+        {currentStation
+          ? `🎵 Listening to ${currentStation.country} Radio`
+          : "Enjoy our project! 🌍"}
+      </div>
 
       {/* Like Menu Overlay */}
       {showLikeMenu && (
