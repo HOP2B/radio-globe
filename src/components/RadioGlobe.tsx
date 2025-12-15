@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Canvas, useLoader, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Sphere } from "@react-three/drei";
-import { TextureLoader, Camera, Vector3 } from "three";
+import { TextureLoader, Vector3 } from "three";
 import type { RadioStation } from "../api/radio";
 import LikeMenu from "./LikeMenu";
 
@@ -48,8 +48,6 @@ function RadioDot({
       // Smaller when zoomed in (closer to earth)
       // Larger when zoomed out (farther from earth)
       const baseSize = 0.04;
-      const minSize = 0.01;
-      const maxSize = 0.06;
       const normalizedDistance = Math.max(0, Math.min(1, (distance - 6) / 10));
       let newSize = baseSize * (0.3 + 0.7 * normalizedDistance);
 
@@ -101,9 +99,9 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     new Set()
   );
   const [showLikeMenu, setShowLikeMenu] = useState(false); // Hide menu by default
-  const [menuAnimation, setMenuAnimation] = useState("slide-in");
+  const menuAnimation = "slide-in";
   const [isBalloonRiding, setIsBalloonRiding] = useState(false);
-  const [zoomProgress, setZoomProgress] = useState(0);
+  const [_zoomProgress, setZoomProgress] = useState(0);
   const [isZoomingOut, setIsZoomingOut] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
@@ -245,9 +243,8 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                   return;
                 }
                 // Stop previous audio if playing
-                const currentAudio = audioRefObj.current;
-                if (currentAudio && !currentAudio.paused) {
-                  currentAudio.pause();
+                if (audioRef && !audioRef.paused) {
+                  audioRef.pause();
                 }
                 setAudioEnabled(true);
                 setCurrentStation(station);

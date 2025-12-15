@@ -8,8 +8,8 @@ import SplashScreen from "./components/SplashScreen";
 
 export default function App() {
   const [radios, setRadios] = useState<RadioStation[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [_loading, setLoading] = useState(true);
+  const [_error, setError] = useState<string | null>(null);
   const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {

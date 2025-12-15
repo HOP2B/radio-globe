@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { useState } from "react";
 import { Canvas, useLoader } from "@react-three/fiber";
 import { Sphere, OrbitControls } from "@react-three/drei";
 import { TextureLoader } from "three";
