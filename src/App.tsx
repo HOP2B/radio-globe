@@ -33,6 +33,9 @@ export default function App() {
     loadRadios();
   }, []);
 
+  console.log("log");
+
+
   return (
     <div className="h-screen w-screen bg-black flex items-center justify-center">
       {showSplash ? (
