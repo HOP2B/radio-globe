@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { useState, useRef, useEffect} from "react";
+import { useState, useRef, useEffect } from "react";
 import { Canvas, useLoader, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Sphere, Stars } from "@react-three/drei";
 import { TextureLoader, Vector3 } from "three";
@@ -442,7 +442,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                 station={station}
                 currentStation={currentStation}
                 isUnavailable={unavailableStations.has(station.stationuuid)}
-                onClick={() => {
+                onClick={async () => {
                   if (unavailableStations.has(station.stationuuid)) {
                     // Show message for unavailable station
                     alert(`${station.name} is currently unavailable`);
@@ -455,13 +455,26 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                   setAudioEnabled(true);
                   setCurrentStation(station);
                   setIsPlaying(true);
-                  // Auto-play immediately on click
+                  // Auto-play immediately on click with better error handling
                   if (audioRef) {
                     audioRef.src = station.url;
                     audioRef.volume = volume;
-                    audioRef
-                      .play()
-                      .catch((e) => console.log("Auto-play failed:", e));
+                    try {
+                      await audioRef.play();
+                      console.log("Auto-play successful for:", station.name);
+                    } catch (e) {
+                      console.log("Auto-play failed:", e);
+                      // Try again after a short delay
+                      setTimeout(() => {
+                        if (audioRef && audioRef.src === station.url) {
+                          audioRef
+                            .play()
+                            .catch((e2) =>
+                              console.log("Retry auto-play failed:", e2)
+                            );
+                        }
+                      }, 100);
+                    }
                   }
                 }}
                 onPointerOver={() => setHoveredStation(station)}
