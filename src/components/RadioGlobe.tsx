@@ -1,11 +1,28 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Canvas, useLoader, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Sphere } from "@react-three/drei";
 import { TextureLoader, Vector3 } from "three";
 import type { RadioStation } from "../api/radio";
 import LikeMenu from "./LikeMenu";
+// Icons import
+import {
+  FaPlay,
+  FaPause,
+  FaStepBackward,
+  FaStepForward,
+  FaVolumeMute,
+  FaVolumeDown,
+  FaVolumeUp,
+  FaSearch,
+  FaHeart,
+  FaGlobe,
+  FaHome,
+  FaCloud,
+  FaBroadcastTower,
+} from "react-icons/fa";
+import { HiSpeakerWave } from "react-icons/hi2";
 
 // Props type
 type RadioGlobeProps = {
@@ -103,10 +120,63 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   const [isBalloonRiding, setIsBalloonRiding] = useState(false);
   const [_zoomProgress, setZoomProgress] = useState(0);
   const [isZoomingOut, setIsZoomingOut] = useState(false);
+  const [isZoomingIn, setIsZoomingIn] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
   const cameraRef = useRef<any>(null);
   const radius = 5;
+
+  // Auto-zoom to station when it starts playing
+  const autoZoomToStation = useCallback(
+    (station: RadioStation) => {
+      if (cameraRef.current && controlsRef.current && !isBalloonRiding) {
+        const pos = latLngToXYZ(
+          station.latitude!,
+          station.longitude!,
+          radius + 0.8
+        );
+
+        setIsZoomingIn(true);
+        controlsRef.current.reset();
+        controlsRef.current.target.set(pos[0], pos[1], pos[2]);
+        controlsRef.current.update();
+
+        const camera = cameraRef.current;
+        const targetPosition = {
+          x: pos[0] * 0.3,
+          y: pos[1] * 0.3 + 1,
+          z: pos[2] * 0.3 + 2,
+        };
+
+        // Smooth zoom animation
+        const animateZoom = () => {
+          if (!isZoomingIn) return;
+
+          const currentPos = camera.position;
+          const targetVector = new Vector3(
+            targetPosition.x,
+            targetPosition.y,
+            targetPosition.z
+          );
+
+          currentPos.lerp(targetVector, 0.05);
+          camera.lookAt(pos[0], pos[1], pos[2]);
+          controlsRef.current?.update();
+
+          // Check if we've reached the target
+          if (currentPos.distanceTo(targetVector) < 0.1) {
+            setIsZoomingIn(false);
+            return;
+          }
+
+          requestAnimationFrame(animateZoom);
+        };
+
+        animateZoom();
+      }
+    },
+    [isBalloonRiding, isZoomingIn]
+  );
 
   // Handle audio setup when station changes
   useEffect(() => {
@@ -120,7 +190,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         });
       }
     }
-  }, [currentStation, audioRef]);
+  }, [currentStation, audioRef, volume, isPlaying]);
 
   // Handle play/pause state changes
   useEffect(() => {
@@ -135,6 +205,13 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       }
     }
   }, [isPlaying, audioRef, currentStation]);
+
+  // Auto-zoom when station starts playing
+  useEffect(() => {
+    if (isPlaying && currentStation && !isBalloonRiding) {
+      autoZoomToStation(currentStation);
+    }
+  }, [isPlaying, currentStation, isBalloonRiding, autoZoomToStation]);
 
   // Handle volume changes
   useEffect(() => {
@@ -239,7 +316,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
               onClick={() => {
                 if (unavailableStations.has(station.stationuuid)) {
                   // Show message for unavailable station
-                  alert(`❌ ${station.name} is currently unavailable`);
+                  alert(`${station.name} is currently unavailable`);
                   return;
                 }
                 // Stop previous audio if playing
@@ -279,9 +356,13 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           fontSize: "14px",
           fontWeight: "500",
           backdropFilter: "blur(10px)",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
         }}
       >
-        📻 {radios.length} Stations
+        <FaBroadcastTower style={{ color: "#1DB954" }} />
+        {radios.length} Stations
       </div>
 
       {/* Balloon Ride Button */}
@@ -332,6 +413,9 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           backdropFilter: "blur(10px)",
           cursor: "pointer",
           transition: "all 0.2s ease",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.background = "rgba(0,0,0,0.9)";
@@ -342,7 +426,8 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           e.currentTarget.style.transform = "translateY(0)";
         }}
       >
-        🎈 Balloon Ride
+        <FaCloud style={{ color: "#87CEEB" }} />
+        Balloon Ride
       </button>
 
       {/* Go Home Button */}
@@ -367,6 +452,9 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           backdropFilter: "blur(10px)",
           cursor: "pointer",
           transition: "all 0.2s ease",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.background = "rgba(0,0,0,0.9)";
@@ -377,7 +465,8 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           e.currentTarget.style.transform = "translateY(0)";
         }}
       >
-        🏠 Go Home
+        <FaHome style={{ color: "#1DB954" }} />
+        Go Home
       </button>
 
       {/* Like Menu Button - Toggle button */}
@@ -398,6 +487,9 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           cursor: "pointer",
           transition: "all 0.2s ease",
           boxShadow: showLikeMenu ? "0 0 20px rgba(30, 185, 84, 0.3)" : "none",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.background = "rgba(0,0,0,0.9)";
@@ -408,7 +500,17 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           e.currentTarget.style.transform = "scale(1)";
         }}
       >
-        {showLikeMenu ? "❤️ Close Menu" : "🔍 Open Search"}
+        {showLikeMenu ? (
+          <>
+            <FaHeart style={{ color: "#ff6b6b" }} />
+            Close Menu
+          </>
+        ) : (
+          <>
+            <FaSearch style={{ color: "#1DB954" }} />
+            Open Search
+          </>
+        )}
       </button>
 
       {/* Spotify-like player panel - hidden during balloon ride */}
@@ -571,7 +673,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                   e.currentTarget.style.transform = "scale(1)";
                 }}
               >
-                ⏪
+                <FaStepBackward />
               </button>
 
               {/* Play/Pause Button */}
@@ -625,7 +727,13 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                   }
                 }}
               >
-                {isLoading ? "⏳" : isPlaying ? "⏸️" : "▶️"}
+                {isLoading ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                ) : isPlaying ? (
+                  <FaPause />
+                ) : (
+                  <FaPlay />
+                )}
               </button>
 
               {/* Skip Forward */}
@@ -661,7 +769,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                   e.currentTarget.style.transform = "scale(1)";
                 }}
               >
-                ⏩
+                <FaStepForward />
               </button>
             </div>
 
@@ -670,7 +778,13 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
               <span
                 style={{ fontSize: "14px", color: "rgba(255,255,255,0.7)" }}
               >
-                {volume === 0 ? "🔇" : volume < 0.5 ? "🔉" : "🔊"}
+                {volume === 0 ? (
+                  <FaVolumeMute />
+                ) : volume < 0.5 ? (
+                  <FaVolumeDown />
+                ) : (
+                  <FaVolumeUp />
+                )}
               </span>
               <input
                 type="range"
@@ -716,11 +830,22 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           fontWeight: "400",
           backdropFilter: "blur(10px)",
           textAlign: "center",
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
         }}
       >
-        {currentStation
-          ? `🎵 Listening to ${currentStation.country} Radio`
-          : "Enjoy our project! 🌍"}
+        {currentStation ? (
+          <>
+            <HiSpeakerWave style={{ color: "#1DB954" }} />
+            Listening to {currentStation.country} Radio
+          </>
+        ) : (
+          <>
+            <FaGlobe style={{ color: "#1DB954" }} />
+            Enjoy our project!
+          </>
+        )}
       </div>
 
       {/* Like Menu Overlay */}

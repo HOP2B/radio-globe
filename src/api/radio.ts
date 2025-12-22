@@ -143,71 +143,111 @@ export interface RadioStation {
 }
 
 export const fetchRadios = async (): Promise<RadioStation[]> => {
+  console.log("Starting radio fetch...");
+  
   // Create AbortController for timeout
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), 15000); // Increased to 15 seconds
 
   try {
-    // Fetch stations without geo filter, we'll filter in code
-    const res = await fetch(
-      "https://de1.api.radio-browser.info/json/stations?limit=2000",
-      { signal: controller.signal }
-    );
-    clearTimeout(timeoutId);
+    // Try multiple API endpoints for better reliability
+    const endpoints = [
+      "https://de1.api.radio-browser.info/json/stations?limit=1000",
+      "https://all.api.radio-browser.info/json/stations?limit=1000",
+      "https://fr1.api.radio-browser.info/json/stations?limit=1000"
+    ];
 
-    if (!res.ok) {
-      throw new Error(
-        `Failed to fetch radios: ${res.status} ${res.statusText}`
-      );
-    }
-
-    const radios = await res.json();
-
-    // Process all stations, assigning coordinates or country center if missing/invalid
-    const processedRadios = radios
-      .filter((r: any) => r.name && r.url)
-      .slice(0, 500) // limit for performance
-      .map((r: any) => {
-        let lat = parseFloat(r.geo_lat);
-        let lng = parseFloat(r.geo_long);
-        const hasValidCoords =
-          !isNaN(lat) &&
-          !isNaN(lng) &&
-          lat >= -90 &&
-          lat <= 90 &&
-          lng >= -180 &&
-          lng <= 180;
-
-        if (!hasValidCoords) {
-          // Use country center if available, otherwise random
-          const countryCenter = countryCenters[r.countrycode];
-          if (countryCenter) {
-            [lat, lng] = countryCenter;
-          } else {
-            lat = (Math.random() - 0.5) * 180;
-            lng = (Math.random() - 0.5) * 360;
+    let lastError: Error | null = null;
+    
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`Trying endpoint: ${endpoint}`);
+        const res = await fetch(endpoint, { 
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'RadioGlobe/1.0'
           }
+        });
+
+        if (!res.ok) {
+          throw new Error(
+            `HTTP ${res.status}: ${res.statusText}`
+          );
         }
 
-        return {
-          ...r,
-          latitude: lat,
-          longitude: lng,
-          city: r.state || r.country,
-        };
-      });
+        const radios = await res.json();
+        console.log(`Received ${radios.length} stations from API`);
 
-    console.log("Processed radios:", processedRadios.length);
+        if (!Array.isArray(radios) || radios.length === 0) {
+          throw new Error("API returned empty or invalid data");
+        }
 
-    return processedRadios;
+        // Process stations, assigning coordinates or country center if missing/invalid
+        const processedRadios = radios
+          .filter((r: any) => r.name && r.url)
+          .slice(0, 300) // Reduced limit for better performance
+          .map((r: any) => {
+            let lat = parseFloat(r.geo_lat);
+            let lng = parseFloat(r.geo_long);
+            const hasValidCoords =
+              !isNaN(lat) &&
+              !isNaN(lng) &&
+              lat >= -90 &&
+              lat <= 90 &&
+              lng >= -180 &&
+              lng <= 180;
+
+            if (!hasValidCoords) {
+              // Use country center if available, otherwise random
+              const countryCenter = countryCenters[r.countrycode];
+              if (countryCenter) {
+                [lat, lng] = countryCenter;
+              } else {
+                lat = (Math.random() - 0.5) * 180;
+                lng = (Math.random() - 0.5) * 360;
+              }
+            }
+
+            return {
+              stationuuid: r.stationuuid || `${r.name}-${Math.random()}`,
+              name: r.name,
+              url: r.url,
+              favicon: r.favicon || '',
+              country: r.country || 'Unknown',
+              city: r.state || r.country || 'Unknown',
+              latitude: lat,
+              longitude: lng,
+              language: r.language,
+              bitrate: r.bitrate,
+              codec: r.codec,
+              votes: r.votes,
+            };
+          });
+
+        console.log("Processed radios:", processedRadios.length);
+        clearTimeout(timeoutId);
+        return processedRadios;
+        
+      } catch (err) {
+        console.warn(`Endpoint ${endpoint} failed:`, err);
+        lastError = err instanceof Error ? err : new Error(String(err));
+        continue; // Try next endpoint
+      }
+    }
+
+    // If all endpoints failed, throw the last error
+    throw lastError || new Error("All API endpoints failed");
+    
   } catch (error) {
     clearTimeout(timeoutId);
+    console.error("Radio fetch error:", error);
+    
     if (error instanceof Error) {
       if (error.name === "AbortError") {
         throw new Error("Request timed out - API may be slow or unreachable");
       }
       throw error;
     }
-    throw new Error("Unknown error occurred while fetching radios");
+    throw new Error("Failed to fetch radio stations");
   }
 };
