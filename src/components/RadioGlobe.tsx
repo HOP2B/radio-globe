@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Canvas, useLoader, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, Sphere } from "@react-three/drei";
+import { OrbitControls, Sphere, Stars } from "@react-three/drei";
 import { TextureLoader, Vector3 } from "three";
 import type { RadioStation } from "../api/radio";
 import LikeMenu from "./LikeMenu";
@@ -48,12 +48,16 @@ function RadioDot({
   currentStation,
   onClick,
   isUnavailable,
+  onPointerOver,
+  onPointerOut,
 }: {
   position: [number, number, number];
   station: RadioStation;
   currentStation: RadioStation | null;
   onClick: () => void;
   isUnavailable: boolean;
+  onPointerOver?: () => void;
+  onPointerOut?: () => void;
 }) {
   const { camera } = useThree();
   const [size, setSize] = useState(0.04);
@@ -78,7 +82,12 @@ function RadioDot({
   });
 
   return (
-    <mesh position={position} onClick={onClick}>
+    <mesh
+      position={position}
+      onClick={onClick}
+      onPointerOver={onPointerOver}
+      onPointerOut={onPointerOut}
+    >
       <sphereGeometry args={[size, 8, 8]} />
       <meshStandardMaterial
         color={
@@ -121,6 +130,20 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   const [_zoomProgress, setZoomProgress] = useState(0);
   const [isZoomingOut, setIsZoomingOut] = useState(false);
   const [isZoomingIn, setIsZoomingIn] = useState(false);
+  const [isAISuggesting, setIsAISuggesting] = useState(false);
+  const [aiRecommendation, setAiRecommendation] = useState<{
+    station: RadioStation;
+    message: string;
+  } | null>(null);
+  const [hoveredStation, setHoveredStation] = useState<RadioStation | null>(
+    null
+  );
+  const [filterType, setFilterType] = useState<"all" | "country" | "language">(
+    "all"
+  );
+  const [filterValue, setFilterValue] = useState<string>("");
+  const [showFilters, setShowFilters] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
   const cameraRef = useRef<any>(null);
@@ -198,7 +221,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       if (isPlaying) {
         audioRef.play().catch((e) => {
           console.log("Play prevented:", e);
-          setIsPlaying(false);
+          // Don't set to false, keep trying or let user click play button
         });
       } else {
         audioRef.pause();
@@ -206,12 +229,12 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     }
   }, [isPlaying, audioRef, currentStation]);
 
-  // Auto-zoom when station starts playing
-  useEffect(() => {
-    if (isPlaying && currentStation && !isBalloonRiding) {
-      autoZoomToStation(currentStation);
-    }
-  }, [isPlaying, currentStation, isBalloonRiding, autoZoomToStation]);
+  // Auto-zoom disabled - free camera movement
+  // useEffect(() => {
+  //   if (isPlaying && currentStation && !isBalloonRiding) {
+  //     autoZoomToStation(currentStation);
+  //   }
+  // }, [isPlaying, currentStation, isBalloonRiding, autoZoomToStation]);
 
   // Handle volume changes
   useEffect(() => {
@@ -220,11 +243,163 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     }
   }, [volume, audioRef]);
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Prevent shortcuts when typing in inputs
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
+      switch (event.code) {
+        case "Space":
+          event.preventDefault();
+          if (!audioEnabled) {
+            setAudioEnabled(true);
+          }
+          if (audioRef) {
+            if (isPlaying) {
+              audioRef.pause();
+              setIsPlaying(false);
+            } else {
+              audioRef.play().catch((e) => console.log("Play prevented:", e));
+              setIsPlaying(true);
+            }
+          }
+          break;
+        case "ArrowLeft":
+          event.preventDefault();
+          if (audioRef) {
+            audioRef.currentTime = Math.max(0, audioRef.currentTime - 15);
+          }
+          break;
+        case "ArrowRight":
+          event.preventDefault();
+          if (audioRef) {
+            audioRef.currentTime = Math.min(
+              duration,
+              audioRef.currentTime + 15
+            );
+          }
+          break;
+        case "ArrowUp":
+          event.preventDefault();
+          setVolume(Math.min(1, volume + 0.1));
+          break;
+        case "ArrowDown":
+          event.preventDefault();
+          setVolume(Math.max(0, volume - 0.1));
+          break;
+        case "KeyM":
+          event.preventDefault();
+          setVolume(volume === 0 ? 0.7 : 0);
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [audioEnabled, audioRef, isPlaying, volume, duration]);
+
   // Format time in MM:SS format
   const formatTime = (time: number) => {
     const minutes = Math.floor(time / 60);
     const seconds = Math.floor(time % 60);
     return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  };
+
+  // AI recommendation using Gemini
+  const getAIRecommendation = async (
+    currentStation: RadioStation,
+    allStations: RadioStation[]
+  ) => {
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("Gemini API key not found");
+    }
+
+    const prompt = `Based on the radio station "${currentStation.name}" from ${
+      currentStation.country
+    }, recommend ONE similar radio station from this list: ${allStations
+      .slice(0, 50)
+      .map((s) => `${s.name} (${s.country})`)
+      .join(", ")}. Respond with just the station name, nothing else.`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: prompt,
+                  },
+                ],
+              },
+            ],
+          }),
+          signal: controller.signal,
+        }
+      );
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (
+        !data.candidates ||
+        !data.candidates[0] ||
+        !data.candidates[0].content ||
+        !data.candidates[0].content.parts ||
+        !data.candidates[0].content.parts[0]
+      ) {
+        throw new Error("Invalid API response format");
+      }
+
+      const recommendedName = data.candidates[0].content.parts[0].text.trim();
+
+      // Find the station by name (more flexible matching)
+      const recommendedStation = allStations.find(
+        (s) =>
+          s.name.toLowerCase().includes(recommendedName.toLowerCase()) ||
+          recommendedName.toLowerCase().includes(s.name.toLowerCase()) ||
+          s.name
+            .toLowerCase()
+            .split(" ")
+            .some((word: string) =>
+              recommendedName.toLowerCase().includes(word)
+            ) ||
+          recommendedName
+            .toLowerCase()
+            .split(" ")
+            .some((word: string) => s.name.toLowerCase().includes(word))
+      );
+      return (
+        recommendedStation ||
+        allStations[Math.floor(Math.random() * allStations.length)]
+      );
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error("AI request timed out");
+      }
+      throw error;
+    }
   };
 
   // Smooth zoom-out animation
@@ -247,6 +422,8 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         currentPos.lerp(new Vector3(...targetPos), 0.05);
         cameraRef.current.lookAt(0, 0, 0);
         if (controlsRef.current) {
+          // Reset controls target to earth center
+          controlsRef.current.target.set(0, 0, 0);
           controlsRef.current.update();
         }
       }
@@ -299,44 +476,77 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         </Sphere>
 
         {/* Radio dots - size scales with zoom */}
-        {radios.map((station) => {
-          const pos = latLngToXYZ(
-            station.latitude!,
-            station.longitude!,
-            radius + 0.1
-          );
+        {radios
+          .filter((station) => {
+            if (filterType === "all" || !filterValue) return true;
+            if (filterType === "country")
+              return station.country
+                .toLowerCase()
+                .includes(filterValue.toLowerCase());
+            if (filterType === "language")
+              return station.language
+                ?.toLowerCase()
+                .includes(filterValue.toLowerCase());
+            return true;
+          })
+          .map((station) => {
+            const pos = latLngToXYZ(
+              station.latitude!,
+              station.longitude!,
+              radius + 0.1
+            );
 
-          return (
-            <RadioDot
-              key={station.stationuuid}
-              position={pos}
-              station={station}
-              currentStation={currentStation}
-              isUnavailable={unavailableStations.has(station.stationuuid)}
-              onClick={() => {
-                if (unavailableStations.has(station.stationuuid)) {
-                  // Show message for unavailable station
-                  alert(`${station.name} is currently unavailable`);
-                  return;
-                }
-                // Stop previous audio if playing
-                if (audioRef && !audioRef.paused) {
-                  audioRef.pause();
-                }
-                setAudioEnabled(true);
-                setCurrentStation(station);
-                setIsPlaying(true);
-              }}
-            />
-          );
-        })}
+            return (
+              <RadioDot
+                key={station.stationuuid}
+                position={pos}
+                station={station}
+                currentStation={currentStation}
+                isUnavailable={unavailableStations.has(station.stationuuid)}
+                onClick={() => {
+                  if (unavailableStations.has(station.stationuuid)) {
+                    // Show message for unavailable station
+                    alert(`${station.name} is currently unavailable`);
+                    return;
+                  }
+                  // Stop previous audio if playing
+                  if (audioRef && !audioRef.paused) {
+                    audioRef.pause();
+                  }
+                  setAudioEnabled(true);
+                  setCurrentStation(station);
+                  setIsPlaying(true);
+                  // Auto-play immediately on click
+                  if (audioRef) {
+                    audioRef.src = station.url;
+                    audioRef.volume = volume;
+                    audioRef
+                      .play()
+                      .catch((e) => console.log("Auto-play failed:", e));
+                  }
+                }}
+                onPointerOver={() => setHoveredStation(station)}
+                onPointerOut={() => setHoveredStation(null)}
+              />
+            );
+          })}
 
         <OrbitControls
           ref={controlsRef}
           enableZoom={true}
           enablePan={false}
-          minDistance={radius + 1}
+          minDistance={radius + 3}
           maxDistance={radius + 20}
+        />
+
+        {/* Starfield background */}
+        <Stars
+          radius={300}
+          depth={50}
+          count={5000}
+          factor={4}
+          saturation={0}
+          fade
         />
 
         {isZoomingOut && <ZoomAnimation />}
@@ -468,6 +678,389 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         <FaHome style={{ color: "#1DB954" }} />
         Go Home
       </button>
+
+      {/* Filter Button */}
+      <button
+        onClick={() => setShowFilters(!showFilters)}
+        style={{
+          position: "absolute",
+          top: 240,
+          right: 20,
+          color: "white",
+          background: showFilters
+            ? "rgba(30, 185, 84, 0.8)"
+            : "rgba(0,0,0,0.8)",
+          padding: "10px 16px",
+          borderRadius: "8px",
+          border: "1px solid rgba(255,255,255,0.2)",
+          fontSize: "14px",
+          fontWeight: "500",
+          backdropFilter: "blur(10px)",
+          cursor: "pointer",
+          transition: "all 0.2s ease",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = showFilters
+            ? "rgba(30, 185, 84, 0.9)"
+            : "rgba(0,0,0,0.9)";
+          e.currentTarget.style.transform = "translateY(-2px)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = showFilters
+            ? "rgba(30, 185, 84, 0.8)"
+            : "rgba(0,0,0,0.8)";
+          e.currentTarget.style.transform = "translateY(0)";
+        }}
+      >
+        <FaSearch style={{ color: showFilters ? "#fff" : "#1DB954" }} />
+        {filterType === "all"
+          ? "Filter"
+          : `${filterType}: ${filterValue || "All"}`}
+      </button>
+
+      {/* AI Suggest Button */}
+      <button
+        onClick={async () => {
+          if (!currentStation) {
+            setAiRecommendation({
+              station: null as any,
+              message:
+                "Please select a station first to get AI recommendations",
+            });
+            setTimeout(() => setAiRecommendation(null), 3000);
+            return;
+          }
+          setIsAISuggesting(true);
+          try {
+            const suggestedStation = await getAIRecommendation(
+              currentStation,
+              radios
+            );
+            // Auto-play the suggested station
+            if (audioRef && !audioRef.paused) {
+              audioRef.pause();
+            }
+            setAudioEnabled(true);
+            setCurrentStation(suggestedStation);
+            setIsPlaying(true);
+            if (audioRef) {
+              audioRef.src = suggestedStation.url;
+              audioRef.volume = volume;
+              audioRef.play().catch((e) => console.log("Auto-play failed:", e));
+            }
+            setAiRecommendation({
+              station: suggestedStation,
+              message: `🤖 AI suggests: ${suggestedStation.name} from ${suggestedStation.country}`,
+            });
+            setTimeout(() => setAiRecommendation(null), 5000);
+          } catch (error) {
+            console.error("AI recommendation failed:", error);
+            // Fallback to same country
+            const sameCountryStations = radios.filter(
+              (station) =>
+                station.country === currentStation.country &&
+                station.stationuuid !== currentStation.stationuuid
+            );
+            if (sameCountryStations.length > 0) {
+              const suggestedStation =
+                sameCountryStations[
+                  Math.floor(Math.random() * sameCountryStations.length)
+                ];
+              if (audioRef && !audioRef.paused) {
+                audioRef.pause();
+              }
+              setAudioEnabled(true);
+              setCurrentStation(suggestedStation);
+              setIsPlaying(true);
+              if (audioRef) {
+                audioRef.src = suggestedStation.url;
+                audioRef.volume = volume;
+                audioRef
+                  .play()
+                  .catch((e) => console.log("Auto-play failed:", e));
+              }
+              setAiRecommendation({
+                station: suggestedStation,
+                message: `AI suggests: ${suggestedStation.name} from ${suggestedStation.country}`,
+              });
+              setTimeout(() => setAiRecommendation(null), 5000);
+            } else {
+              setAiRecommendation({
+                station: null as any,
+                message: "No recommendations available",
+              });
+              setTimeout(() => setAiRecommendation(null), 3000);
+            }
+          } finally {
+            setIsAISuggesting(false);
+          }
+        }}
+        style={{
+          position: "absolute",
+          top: 190,
+          right: 20,
+          color: "white",
+          background: "rgba(0,0,0,0.8)",
+          padding: "10px 16px",
+          borderRadius: "8px",
+          border: "1px solid rgba(255,255,255,0.2)",
+          fontSize: "14px",
+          fontWeight: "500",
+          backdropFilter: "blur(10px)",
+          cursor: "pointer",
+          transition: "all 0.2s ease",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(0,0,0,0.9)";
+          e.currentTarget.style.transform = "translateY(-2px)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "rgba(0,0,0,0.8)";
+          e.currentTarget.style.transform = "translateY(0)";
+        }}
+      >
+        {isAISuggesting ? "🤖 Thinking..." : "🤖 AI Text Suggest"}
+      </button>
+
+      {/* Help Button */}
+      <button
+        onClick={() => setShowShortcuts(!showShortcuts)}
+        style={{
+          position: "absolute",
+          bottom: 20,
+          left: 20,
+          color: "white",
+          background: showShortcuts
+            ? "rgba(30, 185, 84, 0.8)"
+            : "rgba(0,0,0,0.8)",
+          padding: "8px 12px",
+          borderRadius: "8px",
+          border: "1px solid rgba(255,255,255,0.2)",
+          fontSize: "12px",
+          fontWeight: "500",
+          backdropFilter: "blur(10px)",
+          cursor: "pointer",
+          transition: "all 0.2s ease",
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = showShortcuts
+            ? "rgba(30, 185, 84, 0.9)"
+            : "rgba(0,0,0,0.9)";
+          e.currentTarget.style.transform = "scale(1.05)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = showShortcuts
+            ? "rgba(30, 185, 84, 0.8)"
+            : "rgba(0,0,0,0.8)";
+          e.currentTarget.style.transform = "scale(1)";
+        }}
+      >
+        ❓ Help
+      </button>
+
+      {/* Keyboard Shortcuts Panel */}
+      {showShortcuts && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 70,
+            left: 20,
+            background: "rgba(0,0,0,0.9)",
+            color: "white",
+            padding: "16px 20px",
+            borderRadius: "12px",
+            border: "1px solid rgba(255,255,255,0.2)",
+            backdropFilter: "blur(10px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+            zIndex: 50,
+            minWidth: "280px",
+            animation: "fadeIn 0.2s ease-out",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "12px",
+            }}
+          >
+            <div style={{ fontSize: "16px", fontWeight: "600" }}>
+              ⌨️ Keyboard Shortcuts
+            </div>
+            <button
+              onClick={() => setShowShortcuts(false)}
+              style={{
+                background: "none",
+                border: "none",
+                color: "white",
+                cursor: "pointer",
+                fontSize: "18px",
+                padding: "4px",
+                borderRadius: "4px",
+                transition: "all 0.2s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "none";
+              }}
+            >
+              ✕
+            </button>
+          </div>
+
+          <div style={{ fontSize: "14px", lineHeight: "1.6" }}>
+            <div style={{ marginBottom: "8px" }}>
+              <strong>Spacebar:</strong> Play/pause current station
+            </div>
+            <div style={{ marginBottom: "8px" }}>
+              <strong>← → Arrows:</strong> Skip backward/forward 15 seconds
+            </div>
+            <div style={{ marginBottom: "8px" }}>
+              <strong>↑ ↓ Arrows:</strong> Increase/decrease volume
+            </div>
+            <div>
+              <strong>M key:</strong> Mute/unmute
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Filter Panel */}
+      {showFilters && (
+        <div
+          style={{
+            position: "absolute",
+            top: 290,
+            right: 20,
+            background: "rgba(0,0,0,0.9)",
+            color: "white",
+            padding: "16px 20px",
+            borderRadius: "12px",
+            border: "1px solid rgba(255,255,255,0.2)",
+            backdropFilter: "blur(10px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+            zIndex: 50,
+            minWidth: "250px",
+            animation: "fadeIn 0.2s ease-out",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "16px",
+              fontWeight: "600",
+              marginBottom: "12px",
+            }}
+          >
+            🔍 Filter Stations
+          </div>
+
+          {/* Filter Type */}
+          <div style={{ marginBottom: "12px" }}>
+            <label
+              style={{
+                fontSize: "14px",
+                marginBottom: "4px",
+                display: "block",
+              }}
+            >
+              Filter by:
+            </label>
+            <select
+              value={filterType}
+              onChange={(e) => {
+                setFilterType(e.target.value as "all" | "country" | "language");
+                setFilterValue("");
+              }}
+              style={{
+                width: "100%",
+                padding: "8px",
+                borderRadius: "6px",
+                border: "1px solid rgba(255,255,255,0.3)",
+                background: "rgba(255,255,255,0.1)",
+                color: "white",
+                fontSize: "14px",
+              }}
+            >
+              <option value="all">All Stations</option>
+              <option value="country">Country</option>
+              <option value="language">Language</option>
+            </select>
+          </div>
+
+          {/* Filter Value */}
+          {filterType !== "all" && (
+            <div style={{ marginBottom: "12px" }}>
+              <label
+                style={{
+                  fontSize: "14px",
+                  marginBottom: "4px",
+                  display: "block",
+                }}
+              >
+                {filterType === "country" ? "Country name:" : "Language:"}
+              </label>
+              <input
+                type="text"
+                value={filterValue}
+                onChange={(e) => setFilterValue(e.target.value)}
+                placeholder={
+                  filterType === "country"
+                    ? "e.g. United States"
+                    : "e.g. English"
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "6px",
+                  border: "1px solid rgba(255,255,255,0.3)",
+                  background: "rgba(255,255,255,0.1)",
+                  color: "white",
+                  fontSize: "14px",
+                }}
+              />
+            </div>
+          )}
+
+          {/* Clear Filter */}
+          <button
+            onClick={() => {
+              setFilterType("all");
+              setFilterValue("");
+            }}
+            style={{
+              width: "100%",
+              padding: "8px",
+              borderRadius: "6px",
+              border: "none",
+              background: "#1DB954",
+              color: "white",
+              fontSize: "14px",
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#17a34a";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "#1DB954";
+            }}
+          >
+            Clear Filter
+          </button>
+        </div>
+      )}
 
       {/* Like Menu Button - Toggle button */}
       <button
@@ -847,6 +1440,94 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           </>
         )}
       </div>
+
+      {/* Station Info Tooltip */}
+      {hoveredStation && (
+        <div
+          style={{
+            position: "absolute",
+            top: 20,
+            right: 20,
+            background: "rgba(0,0,0,0.9)",
+            color: "white",
+            padding: "16px 20px",
+            borderRadius: "12px",
+            border: "1px solid rgba(255,255,255,0.2)",
+            backdropFilter: "blur(10px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+            zIndex: 50,
+            maxWidth: "300px",
+            animation: "fadeIn 0.2s ease-out",
+          }}
+        >
+          <div
+            style={{ fontSize: "16px", fontWeight: "600", marginBottom: "8px" }}
+          >
+            📻 {hoveredStation.name}
+          </div>
+          <div style={{ fontSize: "14px", opacity: 0.8, marginBottom: "4px" }}>
+            🌍 {hoveredStation.country}
+          </div>
+          {hoveredStation.city && (
+            <div
+              style={{ fontSize: "14px", opacity: 0.8, marginBottom: "4px" }}
+            >
+              🏙️ {hoveredStation.city}
+            </div>
+          )}
+          {hoveredStation.language && (
+            <div
+              style={{ fontSize: "14px", opacity: 0.8, marginBottom: "4px" }}
+            >
+              🗣️ {hoveredStation.language}
+            </div>
+          )}
+          {hoveredStation.bitrate && (
+            <div
+              style={{ fontSize: "14px", opacity: 0.8, marginBottom: "4px" }}
+            >
+              📊 {hoveredStation.bitrate} kbps
+            </div>
+          )}
+          {hoveredStation.codec && (
+            <div style={{ fontSize: "14px", opacity: 0.8 }}>
+              🎵 {hoveredStation.codec}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* AI Recommendation Notification */}
+      {aiRecommendation && (
+        <div
+          style={{
+            position: "absolute",
+            top: 100,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "rgba(0,0,0,0.9)",
+            color: "white",
+            padding: "16px 24px",
+            borderRadius: "12px",
+            border: "1px solid rgba(255,255,255,0.2)",
+            backdropFilter: "blur(10px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+            zIndex: 50,
+            maxWidth: "400px",
+            textAlign: "center",
+            animation: "fadeIn 0.3s ease-out",
+          }}
+        >
+          <div
+            style={{ fontSize: "18px", fontWeight: "600", marginBottom: "8px" }}
+          >
+            🎵 New Station
+          </div>
+          <div style={{ fontSize: "14px", opacity: 0.9 }}>
+            {aiRecommendation.message}
+          </div>
+        </div>
+      )}
 
       {/* Like Menu Overlay */}
       {showLikeMenu && (
