@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect} from "react";
 import { Canvas, useLoader, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Sphere, Stars } from "@react-three/drei";
 import { TextureLoader, Vector3 } from "three";
@@ -129,7 +129,6 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   const [isBalloonRiding, setIsBalloonRiding] = useState(false);
   const [_zoomProgress, setZoomProgress] = useState(0);
   const [isZoomingOut, setIsZoomingOut] = useState(false);
-  const [isZoomingIn, setIsZoomingIn] = useState(false);
   const [isAISuggesting, setIsAISuggesting] = useState(false);
   const [aiRecommendation, setAiRecommendation] = useState<{
     station: RadioStation;
@@ -144,62 +143,9 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   const [filterValue, setFilterValue] = useState<string>("");
   const [showFilters, setShowFilters] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
   const cameraRef = useRef<any>(null);
   const radius = 5;
-
-  // Auto-zoom to station when it starts playing
-  const autoZoomToStation = useCallback(
-    (station: RadioStation) => {
-      if (cameraRef.current && controlsRef.current && !isBalloonRiding) {
-        const pos = latLngToXYZ(
-          station.latitude!,
-          station.longitude!,
-          radius + 0.8
-        );
-
-        setIsZoomingIn(true);
-        controlsRef.current.reset();
-        controlsRef.current.target.set(pos[0], pos[1], pos[2]);
-        controlsRef.current.update();
-
-        const camera = cameraRef.current;
-        const targetPosition = {
-          x: pos[0] * 0.3,
-          y: pos[1] * 0.3 + 1,
-          z: pos[2] * 0.3 + 2,
-        };
-
-        // Smooth zoom animation
-        const animateZoom = () => {
-          if (!isZoomingIn) return;
-
-          const currentPos = camera.position;
-          const targetVector = new Vector3(
-            targetPosition.x,
-            targetPosition.y,
-            targetPosition.z
-          );
-
-          currentPos.lerp(targetVector, 0.05);
-          camera.lookAt(pos[0], pos[1], pos[2]);
-          controlsRef.current?.update();
-
-          // Check if we've reached the target
-          if (currentPos.distanceTo(targetVector) < 0.1) {
-            setIsZoomingIn(false);
-            return;
-          }
-
-          requestAnimationFrame(animateZoom);
-        };
-
-        animateZoom();
-      }
-    },
-    [isBalloonRiding, isZoomingIn]
-  );
 
   // Handle audio setup when station changes
   useEffect(() => {
@@ -228,13 +174,6 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       }
     }
   }, [isPlaying, audioRef, currentStation]);
-
-  // Auto-zoom disabled - free camera movement
-  // useEffect(() => {
-  //   if (isPlaying && currentStation && !isBalloonRiding) {
-  //     autoZoomToStation(currentStation);
-  //   }
-  // }, [isPlaying, currentStation, isBalloonRiding, autoZoomToStation]);
 
   // Handle volume changes
   useEffect(() => {
