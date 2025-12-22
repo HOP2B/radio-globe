@@ -6,11 +6,15 @@ import { TextureLoader } from "three";
 type SplashScreenProps = {
   onStart: () => void;
   stationCount: number;
+  error?: string | null;
+  loading?: boolean;
 };
 
 export default function SplashScreen({
   onStart,
   stationCount,
+  error,
+  loading = false,
 }: SplashScreenProps) {
   // Load Earth texture
   const earthTexture = useLoader(
@@ -49,20 +53,49 @@ export default function SplashScreen({
         <h1 className="text-5xl md:text-6xl font-bold text-white mb-4 bg-clip-text bg-gradient-to-r from-white to-gray-300">
           🌍 Radio Globe
         </h1>
-        <p className="text-xl md:text-2xl text-gray-300 mb-8 max-w-2xl mx-auto">
-          Explore thousands of radio stations from around the world
-        </p>
+
+        {error ? (
+          <div className="text-red-400 mb-4 max-w-md mx-auto">
+            <p className="text-lg mb-2">⚠️ Connection Issue</p>
+            <p className="text-sm text-gray-400">{error}</p>
+            <p className="text-sm text-gray-500 mt-2">
+              Using demo stations instead
+            </p>
+          </div>
+        ) : loading ? (
+          <div className="text-white mb-8">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-4 mx-auto"></div>
+            <p className="text-lg">Loading radio stations...</p>
+            <p className="text-sm text-gray-400">
+              Fetching from radio-browser.info
+            </p>
+          </div>
+        ) : (
+          <p className="text-xl md:text-2xl text-gray-300 mb-8 max-w-2xl mx-auto">
+            Explore thousands of radio stations from around the world
+          </p>
+        )}
+
         <button
           onClick={onStart}
-          className="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-8 rounded-full text-lg transition-all transform hover:scale-105 shadow-lg hover:shadow-green-500/30"
+          disabled={loading}
+          className={`${
+            loading
+              ? "bg-gray-500 cursor-not-allowed"
+              : "bg-green-500 hover:bg-green-600 hover:scale-105"
+          } text-white font-bold py-4 px-8 rounded-full text-lg transition-all shadow-lg hover:shadow-green-500/30`}
         >
-          Start Exploring
+          {loading ? "Loading..." : "Start Exploring"}
         </button>
       </div>
 
       {/* Decorative elements */}
       <div className="absolute bottom-10 left-10 text-gray-400 text-sm z-20">
-        🎵 {stationCount} stations loaded
+        {error ? (
+          <span>🎭 Demo mode: {stationCount} stations</span>
+        ) : (
+          <span>🎵 {stationCount} stations loaded</span>
+        )}
       </div>
     </div>
   );
