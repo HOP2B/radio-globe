@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
+import { useState, useEffect } from "react";
 import { Canvas, useLoader } from "@react-three/fiber";
 import { Sphere, OrbitControls } from "@react-three/drei";
 import { TextureLoader } from "three";
@@ -16,6 +16,19 @@ export default function SplashScreen({
   error,
   loading = false,
 }: SplashScreenProps) {
+  const [showError, setShowError] = useState(false);
+
+  // Delay showing error messages to avoid flashing them too quickly
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => setShowError(true), 3000); // 3 second delay
+      return () => {
+        clearTimeout(timer);
+        setShowError(false);
+      };
+    }
+  }, [error]);
+
   // Load Earth texture
   const earthTexture = useLoader(
     TextureLoader,
@@ -54,7 +67,7 @@ export default function SplashScreen({
           🌍 Radio Globe
         </h1>
 
-        {error ? (
+        {showError ? (
           <div className="text-red-400 mb-4 max-w-md mx-auto">
             <p className="text-lg mb-2">⚠️ Connection Issue</p>
             <p className="text-sm text-gray-400">{error}</p>
@@ -91,7 +104,7 @@ export default function SplashScreen({
 
       {/* Decorative elements */}
       <div className="absolute bottom-10 left-10 text-gray-400 text-sm z-20">
-        {error ? (
+        {showError ? (
           <span>🎭 Demo mode: {stationCount} stations</span>
         ) : (
           <span>🎵 {stationCount} stations loaded</span>
