@@ -94,15 +94,15 @@ function RadioDot({
           currentStation?.stationuuid === station.stationuuid
             ? "yellow"
             : isUnavailable
-            ? "red"
-            : "cyan"
+              ? "red"
+              : "cyan"
         }
         emissive={
           currentStation?.stationuuid === station.stationuuid
             ? "gold"
             : isUnavailable
-            ? "darkred"
-            : "darkcyan"
+              ? "darkred"
+              : "darkcyan"
         }
         emissiveIntensity={0.5}
       />
@@ -260,12 +260,11 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       throw new Error("Gemini API key not found");
     }
 
-    const prompt = `Based on the radio station "${currentStation.name}" from ${
-      currentStation.country
-    }, recommend ONE similar radio station from this list: ${allStations
-      .slice(0, 50)
-      .map((s) => `${s.name} (${s.country})`)
-      .join(", ")}. Respond with just the station name, nothing else.`;
+    const prompt = `Based on the radio station "${currentStation.name}" from ${currentStation.country
+      }, recommend ONE similar radio station from this list: ${allStations
+        .slice(0, 50)
+        .map((s) => `${s.name} (${s.country})`)
+        .join(", ")}. Respond with just the station name, nothing else.`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
@@ -567,7 +566,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           right: 20,
           color: "white",
           background: "rgba(0,0,0,0.8)",
-          padding: "10px 16px",
+          padding: "12px 20px",
           borderRadius: "8px",
           border: "1px solid rgba(255,255,255,0.2)",
           fontSize: "14px",
@@ -606,7 +605,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           right: 20,
           color: "white",
           background: "rgba(0,0,0,0.8)",
-          padding: "10px 16px",
+          padding: "12px 20px",
           borderRadius: "8px",
           border: "1px solid rgba(255,255,255,0.2)",
           fontSize: "14px",
@@ -642,7 +641,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           background: showFilters
             ? "rgba(30, 185, 84, 0.8)"
             : "rgba(0,0,0,0.8)",
-          padding: "10px 16px",
+          padding: "12px 20px",
           borderRadius: "8px",
           border: "1px solid rgba(255,255,255,0.2)",
           fontSize: "14px",
@@ -719,7 +718,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
             if (sameCountryStations.length > 0) {
               const suggestedStation =
                 sameCountryStations[
-                  Math.floor(Math.random() * sameCountryStations.length)
+                Math.floor(Math.random() * sameCountryStations.length)
                 ];
               if (audioRef && !audioRef.paused) {
                 audioRef.pause();
@@ -756,7 +755,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           right: 20,
           color: "white",
           background: "rgba(0,0,0,0.8)",
-          padding: "10px 16px",
+          padding: "12px 20px",
           borderRadius: "8px",
           border: "1px solid rgba(255,255,255,0.2)",
           fontSize: "14px",
@@ -791,7 +790,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           background: showShortcuts
             ? "rgba(30, 185, 84, 0.8)"
             : "rgba(0,0,0,0.8)",
-          padding: "8px 12px",
+          padding: "10px 16px",
           borderRadius: "8px",
           border: "1px solid rgba(255,255,255,0.2)",
           fontSize: "12px",
@@ -1023,7 +1022,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           right: 20,
           color: "white",
           background: "rgba(0,0,0,0.8)",
-          padding: "12px 16px",
+          padding: "14px 18px",
           borderRadius: "8px",
           border: "1px solid rgba(255,255,255,0.1)",
           fontSize: "14px",
@@ -1196,8 +1195,8 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                   }
                 }}
                 style={{
-                  width: "32px",
-                  height: "32px",
+                  width: "40px",
+                  height: "40px",
                   borderRadius: "50%",
                   background: "rgba(255,255,255,0.1)",
                   border: "none",
@@ -1206,7 +1205,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: "12px",
+                  fontSize: "14px",
                   transition: "all 0.2s ease",
                 }}
                 onMouseEnter={(e) => {
@@ -1241,8 +1240,8 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                 }}
                 disabled={isLoading}
                 style={{
-                  width: "48px",
-                  height: "48px",
+                  width: "64px",
+                  height: "64px",
                   borderRadius: "50%",
                   background: isLoading ? "rgba(255,255,255,0.2)" : "#1DB954",
                   border: "none",
@@ -1251,7 +1250,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: "18px",
+                  fontSize: "24px",
                   transition: "all 0.2s ease",
                   boxShadow: isLoading
                     ? "none"
@@ -1292,8 +1291,8 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                   }
                 }}
                 style={{
-                  width: "32px",
-                  height: "32px",
+                  width: "40px",
+                  height: "40px",
                   borderRadius: "50%",
                   background: "rgba(255,255,255,0.1)",
                   border: "none",
@@ -1302,7 +1301,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: "12px",
+                  fontSize: "14px",
                   transition: "all 0.2s ease",
                 }}
                 onMouseEnter={(e) => {

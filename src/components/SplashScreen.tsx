@@ -92,11 +92,10 @@ export default function SplashScreen({
         <button
           onClick={onStart}
           disabled={loading}
-          className={`${
-            loading
+          className={`${loading
               ? "bg-gray-500 cursor-not-allowed"
               : "bg-green-500 hover:bg-green-600 hover:scale-105"
-          } text-white font-bold py-4 px-8 rounded-full text-lg transition-all shadow-lg hover:shadow-green-500/30`}
+            } text-white font-bold py-6 px-10 rounded-full text-xl transition-all shadow-lg hover:shadow-green-500/30`}
         >
           {loading ? "Loading..." : "Start Exploring"}
         </button>
