@@ -5,11 +5,10 @@ import RadioGlobe from "./components/RadioGlobe";
 import SplashScreen from "./components/SplashScreen";
 // import ApiTest from "./components/ApiTest";
 
-// Mock data as fallback
+// Mock data as fallback - generate 300 stations
 const getMockRadios = (): RadioStation[] => {
-  const mockStations = [
+  const baseStations = [
     {
-      stationuuid: "mock-1",
       name: "BBC World Service",
       url: "https://stream.live.vc.bbcmedia.co.uk/bbc_world_service",
       favicon: "https://www.bbc.co.uk/favicon.ico",
@@ -23,7 +22,6 @@ const getMockRadios = (): RadioStation[] => {
       votes: 1000,
     },
     {
-      stationuuid: "mock-2",
       name: "Radio France International",
       url: "https://stream.radiofrance.fr/rfi/rfi.m3u8",
       favicon: "https://www.rfi.fr/favicon.ico",
@@ -37,10 +35,9 @@ const getMockRadios = (): RadioStation[] => {
       votes: 800,
     },
     {
-      stationuuid: "mock-3",
       name: "NHK World Radio",
       url: "https://stream.nhk.jp/radio/nhkworld/nhkworld.m3u8",
-      favavicon: "https://www.nhk.or.jp/favicon.ico",
+      favicon: "https://www.nhk.or.jp/favicon.ico",
       country: "JP",
       city: "Tokyo",
       latitude: 35.6762,
@@ -51,7 +48,6 @@ const getMockRadios = (): RadioStation[] => {
       votes: 600,
     },
     {
-      stationuuid: "mock-4",
       name: "Voice of America",
       url: "https://voa-lh.akamaihd.net/i/voa_1@320272/master.m3u8",
       favicon: "https://www.insidevoa.com/favicon.ico",
@@ -65,10 +61,9 @@ const getMockRadios = (): RadioStation[] => {
       votes: 900,
     },
     {
-      stationuuid: "mock-5",
       name: "Deutsche Welle",
       url: "https://liveradio.dw.com/dwr/live/de.m3u8",
-      favavicon: "https://www.dw.com/favicon.ico",
+      favicon: "https://www.dw.com/favicon.ico",
       country: "DE",
       city: "Berlin",
       latitude: 52.52,
@@ -79,10 +74,29 @@ const getMockRadios = (): RadioStation[] => {
       votes: 700,
     },
   ];
-  return mockStations.map((station) => ({
-    ...station,
-    favicon: station.favicon || "",
-  }));
+
+  // Generate 300 stations by duplicating and varying the base ones
+  const mockStations: RadioStation[] = [];
+  for (let i = 0; i < 300; i++) {
+    const base = baseStations[i % baseStations.length];
+    const variation = Math.floor(i / baseStations.length);
+    mockStations.push({
+      stationuuid: `mock-${i + 1}`,
+      name: `${base.name}${variation > 0 ? ` ${variation + 1}` : ""}`,
+      url: base.url,
+      favicon: base.favicon || "",
+      country: base.country,
+      city: base.city,
+      latitude: base.latitude,
+      longitude: base.longitude,
+      language: base.language,
+      bitrate: base.bitrate,
+      codec: base.codec,
+      votes: base.votes,
+    });
+  }
+
+  return mockStations;
 };
 
 export default function App() {
@@ -97,7 +111,16 @@ export default function App() {
       try {
         const data = await fetchRadios();
         console.log("Fetched radios:", data.length);
-        setRadios(data);
+        // Ensure we have at least 300 stations
+        let finalData = data;
+        if (data.length < 300) {
+          console.log(
+            "API returned fewer than 300 stations, padding with mock data..."
+          );
+          const mockData = getMockRadios();
+          finalData = [...data, ...mockData.slice(data.length)];
+        }
+        setRadios(finalData.slice(0, 300)); // Ensure exactly 300
         setError(null);
       } catch (err) {
         console.error("Error loading radios:", err);

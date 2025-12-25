@@ -144,7 +144,7 @@ export interface RadioStation {
 
 export const fetchRadios = async (): Promise<RadioStation[]> => {
   console.log("Starting radio fetch...");
-  
+
   // Create AbortController for timeout
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000); // Increased to 15 seconds
@@ -154,25 +154,23 @@ export const fetchRadios = async (): Promise<RadioStation[]> => {
     const endpoints = [
       "https://de1.api.radio-browser.info/json/stations?limit=1000",
       "https://all.api.radio-browser.info/json/stations?limit=1000",
-      "https://fr1.api.radio-browser.info/json/stations?limit=1000"
+      "https://fr1.api.radio-browser.info/json/stations?limit=1000",
     ];
 
     let lastError: Error | null = null;
-    
+
     for (const endpoint of endpoints) {
       try {
         console.log(`Trying endpoint: ${endpoint}`);
-        const res = await fetch(endpoint, { 
+        const res = await fetch(endpoint, {
           signal: controller.signal,
           headers: {
-            'User-Agent': 'RadioGlobe/1.0'
-          }
+            "User-Agent": "RadioGlobe/1.0",
+          },
         });
 
         if (!res.ok) {
-          throw new Error(
-            `HTTP ${res.status}: ${res.statusText}`
-          );
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         }
 
         const radios = await res.json();
@@ -212,9 +210,9 @@ export const fetchRadios = async (): Promise<RadioStation[]> => {
               stationuuid: r.stationuuid || `${r.name}-${Math.random()}`,
               name: r.name,
               url: r.url,
-              favicon: r.favicon || '',
-              country: r.country || 'Unknown',
-              city: r.state || r.country || 'Unknown',
+              favicon: r.favicon || "",
+              country: r.country || "Unknown",
+              city: r.state || r.country || "Unknown",
               latitude: lat,
               longitude: lng,
               language: r.language,
@@ -227,7 +225,6 @@ export const fetchRadios = async (): Promise<RadioStation[]> => {
         console.log("Processed radios:", processedRadios.length);
         clearTimeout(timeoutId);
         return processedRadios;
-        
       } catch (err) {
         console.warn(`Endpoint ${endpoint} failed:`, err);
         lastError = err instanceof Error ? err : new Error(String(err));
@@ -237,11 +234,10 @@ export const fetchRadios = async (): Promise<RadioStation[]> => {
 
     // If all endpoints failed, throw the last error
     throw lastError || new Error("All API endpoints failed");
-    
   } catch (error) {
     clearTimeout(timeoutId);
     console.error("Radio fetch error:", error);
-    
+
     if (error instanceof Error) {
       if (error.name === "AbortError") {
         throw new Error("Request timed out - API may be slow or unreachable");

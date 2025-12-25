@@ -30,10 +30,7 @@ export default function SplashScreen({
   }, [error]);
 
   // Load Earth texture
-  const earthTexture = useLoader(
-    TextureLoader,
-    "https://upload.wikimedia.org/wikipedia/commons/0/04/Solarsystemscope_texture_8k_earth_daymap.jpg"
-  );
+  const earthTexture = useLoader(TextureLoader, "/earth-map-texture.jpg");
 
   return (
     <div className="relative w-full h-full flex items-center justify-center">

@@ -116,7 +116,10 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   );
   const [audioRef, setAudioRef] = useState<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(0.7);
+  const [volume, setVolume] = useState(() => {
+    const saved = localStorage.getItem("radioVolume");
+    return saved ? parseFloat(saved) : 0.7;
+  });
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -125,10 +128,21 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     new Set()
   );
   const [showLikeMenu, setShowLikeMenu] = useState(false); // Hide menu by default
+  const [showRecentlyPlayed, setShowRecentlyPlayed] = useState(false);
   const menuAnimation = "slide-in";
   const [isBalloonRiding, setIsBalloonRiding] = useState(false);
   const [_zoomProgress, setZoomProgress] = useState(0);
   const [isZoomingOut, setIsZoomingOut] = useState(false);
+  // Balloon Ride guessing states
+  const [isGuessing, setIsGuessing] = useState(false);
+  const [guessCountry, setGuessCountry] = useState("");
+  const [balloonStation, setBalloonStation] = useState<RadioStation | null>(
+    null
+  );
+  const [points, setPoints] = useState(() => {
+    const saved = localStorage.getItem("balloonPoints");
+    return saved ? parseInt(saved) : 0;
+  });
   const [isAISuggesting, setIsAISuggesting] = useState(false);
   const [aiRecommendation, setAiRecommendation] = useState<{
     station: RadioStation;
@@ -143,6 +157,11 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   const [filterValue, setFilterValue] = useState<string>("");
   const [showFilters, setShowFilters] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [searchTerm, setSearchTerm] = useState<string>("");
+  const [recentlyPlayed, setRecentlyPlayed] = useState<RadioStation[]>(() => {
+    const saved = localStorage.getItem("recentlyPlayedStations");
+    return saved ? JSON.parse(saved) : [];
+  });
   const controlsRef = useRef<any>(null);
   const cameraRef = useRef<any>(null);
   const radius = 5;
@@ -180,7 +199,22 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     if (audioRef) {
       audioRef.volume = volume;
     }
+    // Save volume to localStorage
+    localStorage.setItem("radioVolume", volume.toString());
   }, [volume, audioRef]);
+
+  // Save recently played to localStorage
+  useEffect(() => {
+    localStorage.setItem(
+      "recentlyPlayedStations",
+      JSON.stringify(recentlyPlayed)
+    );
+  }, [recentlyPlayed]);
+
+  // Save points to localStorage
+  useEffect(() => {
+    localStorage.setItem("balloonPoints", points.toString());
+  }, [points]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -371,10 +405,84 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   };
 
   // Load Earth texture
-  const earthTexture = useLoader(
-    TextureLoader,
-    "https://upload.wikimedia.org/wikipedia/commons/0/04/Solarsystemscope_texture_8k_earth_daymap.jpg"
-  );
+  const earthTexture = useLoader(TextureLoader, "/earth-map-texture.jpg");
+
+  // Balloon Ride functions
+  const startBalloonRide = () => {
+    const randomStation = radios[Math.floor(Math.random() * radios.length)];
+    setBalloonStation(randomStation);
+    setGuessCountry("");
+    setIsGuessing(true);
+    setIsBalloonRiding(true);
+
+    // Set current station and play
+    setCurrentStation(randomStation);
+    setIsPlaying(true);
+    if (audioRef) {
+      audioRef.src = randomStation.url;
+      audioRef.volume = volume;
+      audioRef.play().catch((e) => console.log("Auto-play failed:", e));
+    }
+
+    // Move camera to station
+    if (cameraRef.current && controlsRef.current) {
+      const pos = latLngToXYZ(
+        randomStation.latitude!,
+        randomStation.longitude!,
+        radius + 0.5
+      );
+      controlsRef.current.reset();
+      controlsRef.current.target.set(pos[0], pos[1], pos[2]);
+      controlsRef.current.update();
+      cameraRef.current.position.set(pos[0], pos[1] + 1, pos[2] + 3);
+      cameraRef.current.lookAt(pos[0], pos[1], pos[2]);
+      controlsRef.current.update();
+    }
+  };
+
+  const checkGuess = () => {
+    if (!balloonStation || !guessCountry.trim()) return;
+
+    const isCorrect =
+      guessCountry
+        .toLowerCase()
+        .includes(balloonStation.country.toLowerCase()) ||
+      balloonStation.country.toLowerCase().includes(guessCountry.toLowerCase());
+
+    if (isCorrect) {
+      setPoints((prev) => prev + 10); // Award 10 points for correct guess
+      setIsGuessing(false);
+      setIsBalloonRiding(false);
+      // Stop the audio
+      if (audioRef) {
+        audioRef.pause();
+        audioRef.currentTime = 0;
+      }
+      // Reset camera to earth
+      if (controlsRef.current) {
+        controlsRef.current.reset();
+      }
+    } else {
+      // Wrong guess - could add feedback here
+    }
+  };
+
+  const giveUp = () => {
+    if (!balloonStation) return;
+    // Show the answer briefly
+    alert(`The country was: ${balloonStation.country}`);
+    setIsGuessing(false);
+    setIsBalloonRiding(false);
+    // Stop the audio
+    if (audioRef) {
+      audioRef.pause();
+      audioRef.currentTime = 0;
+    }
+    // Reset camera to earth
+    if (controlsRef.current) {
+      controlsRef.current.reset();
+    }
+  };
 
   // If no radios loaded yet, show loading
   if (radios.length === 0) {
@@ -417,6 +525,14 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         {/* Radio dots - size scales with zoom */}
         {radios
           .filter((station) => {
+            // First apply search filter
+            if (
+              searchTerm &&
+              !station.name.toLowerCase().includes(searchTerm.toLowerCase())
+            ) {
+              return false;
+            }
+            // Then apply category filters
             if (filterType === "all" || !filterValue) return true;
             if (filterType === "country")
               return station.country
@@ -462,8 +578,22 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                     try {
                       await audioRef.play();
                       console.log("Auto-play successful for:", station.name);
+                      // Mark as available (remove from unavailable set)
+                      setUnavailableStations((prev) => {
+                        const newSet = new Set(prev);
+                        newSet.delete(station.stationuuid);
+                        return newSet;
+                      });
+                      // Add to recently played
+                      setRecentlyPlayed((prev) => {
+                        const filtered = prev.filter(
+                          (s) => s.stationuuid !== station.stationuuid
+                        );
+                        return [station, ...filtered].slice(0, 20); // Keep last 20
+                      });
                     } catch (e) {
                       console.log("Auto-play failed:", e);
+                      // Keep in unavailable set (already there)
                       // Try again after a short delay
                       setTimeout(() => {
                         if (audioRef && audioRef.src === station.url) {
@@ -485,8 +615,9 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
 
         <OrbitControls
           ref={controlsRef}
-          enableZoom={true}
+          enableZoom={!isBalloonRiding && !isGuessing}
           enablePan={false}
+          enableRotate={!isBalloonRiding && !isGuessing}
           minDistance={radius + 3}
           maxDistance={radius + 20}
         />
@@ -527,70 +658,76 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         {radios.length} Stations
       </div>
 
-      {/* Balloon Ride Button */}
-      <button
-        onClick={() => {
-          const randomStation =
-            radios[Math.floor(Math.random() * radios.length)];
-          setCurrentStation(randomStation);
-          setIsBalloonRiding(true);
-          setZoomProgress(0);
-
-          if (cameraRef.current && controlsRef.current) {
-            // Calculate position for the station
-            const pos = latLngToXYZ(
-              randomStation.latitude!,
-              randomStation.longitude!,
-              radius + 0.5
-            );
-
-            // Move camera to station location
-            controlsRef.current.reset();
-            controlsRef.current.target.set(pos[0], pos[1], pos[2]);
-            controlsRef.current.update();
-
-            // Zoom in VERY close (move camera much closer)
-            const camera = cameraRef.current;
-            camera.position.set(pos[0], pos[1] + 1, pos[2] + 3);
-            camera.lookAt(pos[0], pos[1], pos[2]);
-            controlsRef.current.update();
-
-            // Start smooth zoom-out after 3 seconds
-            setTimeout(() => {
-              setIsZoomingOut(true);
-            }, 3000);
-          }
-        }}
+      {/* Points display */}
+      <div
         style={{
           position: "absolute",
-          top: 80,
+          top: 20,
           right: 20,
           color: "white",
           background: "rgba(0,0,0,0.8)",
-          padding: "10px 16px",
+          padding: "12px 16px",
           borderRadius: "8px",
-          border: "1px solid rgba(255,255,255,0.2)",
+          border: "1px solid rgba(255,255,255,0.1)",
           fontSize: "14px",
           fontWeight: "500",
           backdropFilter: "blur(10px)",
-          cursor: "pointer",
-          transition: "all 0.2s ease",
           display: "flex",
           alignItems: "center",
           gap: "8px",
         }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = "rgba(0,0,0,0.9)";
-          e.currentTarget.style.transform = "translateY(-2px)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "rgba(0,0,0,0.8)";
-          e.currentTarget.style.transform = "translateY(0)";
+      >
+        🏆 {points} Points
+      </div>
+
+      {/* Search Bar */}
+      <div
+        style={{
+          position: "absolute",
+          top: 20,
+          left: 180,
+          background: "rgba(0,0,0,0.8)",
+          padding: "12px 16px",
+          borderRadius: "8px",
+          border: "1px solid rgba(255,255,255,0.1)",
+          backdropFilter: "blur(10px)",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          minWidth: "250px",
         }}
       >
-        <FaCloud style={{ color: "#87CEEB" }} />
-        Balloon Ride
-      </button>
+        <FaSearch style={{ color: "#1DB954" }} />
+        <input
+          type="text"
+          placeholder="Search stations..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "white",
+            fontSize: "14px",
+            outline: "none",
+            flex: 1,
+          }}
+        />
+        {searchTerm && (
+          <button
+            onClick={() => setSearchTerm("")}
+            style={{
+              background: "none",
+              border: "none",
+              color: "rgba(255,255,255,0.6)",
+              cursor: "pointer",
+              fontSize: "16px",
+              padding: "2px",
+            }}
+          >
+            ✕
+          </button>
+        )}
+      </div>
 
       {/* Go Home Button */}
       <button
@@ -1014,49 +1151,210 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         </div>
       )}
 
-      {/* Like Menu Button - Toggle button */}
-      <button
-        onClick={() => setShowLikeMenu(!showLikeMenu)}
+      {/* Hidden audio element - always rendered */}
+      <audio
+        ref={(audio) => setAudioRef(audio)}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+        onLoadStart={() => setIsLoading(true)}
+        onCanPlay={() => setIsLoading(false)}
+        onError={(e) => {
+          console.error("Audio error:", e);
+          setIsPlaying(false);
+          setIsLoading(false);
+          if (currentStation) {
+            setUnavailableStations(
+              (prev) => new Set([...prev, currentStation.stationuuid])
+            );
+          }
+        }}
+        style={{ display: "none" }}
+      />
+
+      {/* Control Buttons Container */}
+      <div
         style={{
           position: "absolute",
-          top: 20,
+          top: 80,
           right: 20,
-          color: "white",
-          background: "rgba(0,0,0,0.8)",
-          padding: "12px 16px",
-          borderRadius: "8px",
-          border: "1px solid rgba(255,255,255,0.1)",
-          fontSize: "14px",
-          fontWeight: "500",
-          backdropFilter: "blur(10px)",
-          cursor: "pointer",
-          transition: "all 0.2s ease",
-          boxShadow: showLikeMenu ? "0 0 20px rgba(30, 185, 84, 0.3)" : "none",
           display: "flex",
-          alignItems: "center",
-          gap: "8px",
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = "rgba(0,0,0,0.9)";
-          e.currentTarget.style.transform = "scale(1.05)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "rgba(0,0,0,0.8)";
-          e.currentTarget.style.transform = "scale(1)";
+          flexDirection: "row",
+          gap: "12px",
+          zIndex: 10,
         }}
       >
-        {showLikeMenu ? (
-          <>
-            <FaHeart style={{ color: "#ff6b6b" }} />
-            Close Menu
-          </>
-        ) : (
-          <>
-            <FaSearch style={{ color: "#1DB954" }} />
-            Open Search
-          </>
-        )}
-      </button>
+        {/* Balloon Ride Button */}
+        <button
+          onClick={startBalloonRide}
+          title="Balloon Ride"
+          style={{
+            color: "white",
+            background: "rgba(0,0,0,0.8)",
+            padding: "12px",
+            borderRadius: "8px",
+            border: "1px solid rgba(255,255,255,0.1)",
+            fontSize: "16px",
+            backdropFilter: "blur(10px)",
+            cursor: "pointer",
+            transition: "all 0.2s ease",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "48px",
+            height: "48px",
+            position: "relative",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(0,0,0,0.9)";
+            e.currentTarget.style.transform = "scale(1.05)";
+            // Show tooltip
+            const tooltip = document.createElement("div");
+            tooltip.textContent = "Balloon Ride";
+            tooltip.style.position = "absolute";
+            tooltip.style.right = "60px";
+            tooltip.style.top = "50%";
+            tooltip.style.transform = "translateY(-50%)";
+            tooltip.style.background = "rgba(0,0,0,0.9)";
+            tooltip.style.color = "white";
+            tooltip.style.padding = "8px 12px";
+            tooltip.style.borderRadius = "6px";
+            tooltip.style.fontSize = "14px";
+            tooltip.style.whiteSpace = "nowrap";
+            tooltip.style.zIndex = "1000";
+            tooltip.style.pointerEvents = "none";
+            e.currentTarget.appendChild(tooltip);
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "rgba(0,0,0,0.8)";
+            e.currentTarget.style.transform = "scale(1)";
+            // Remove tooltip
+            const tooltip = e.currentTarget.querySelector("div");
+            if (tooltip) tooltip.remove();
+          }}
+        >
+          <FaCloud style={{ color: "#87CEEB" }} />
+        </button>
+
+        {/* Recently Played Button */}
+        <button
+          onClick={() => setShowRecentlyPlayed(!showRecentlyPlayed)}
+          title={
+            showRecentlyPlayed
+              ? "Close Recent"
+              : `Recent (${recentlyPlayed.length})`
+          }
+          style={{
+            color: "white",
+            background: "rgba(0,0,0,0.8)",
+            padding: "12px",
+            borderRadius: "8px",
+            border: "1px solid rgba(255,255,255,0.1)",
+            fontSize: "16px",
+            backdropFilter: "blur(10px)",
+            cursor: "pointer",
+            transition: "all 0.2s ease",
+            boxShadow: showRecentlyPlayed
+              ? "0 0 20px rgba(30, 185, 84, 0.3)"
+              : "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "48px",
+            height: "48px",
+            position: "relative",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(0,0,0,0.9)";
+            e.currentTarget.style.transform = "scale(1.05)";
+            // Show tooltip
+            const tooltip = document.createElement("div");
+            tooltip.textContent = showRecentlyPlayed
+              ? "Close Recent"
+              : `Recent (${recentlyPlayed.length})`;
+            tooltip.style.position = "absolute";
+            tooltip.style.right = "60px";
+            tooltip.style.top = "50%";
+            tooltip.style.transform = "translateY(-50%)";
+            tooltip.style.background = "rgba(0,0,0,0.9)";
+            tooltip.style.color = "white";
+            tooltip.style.padding = "8px 12px";
+            tooltip.style.borderRadius = "6px";
+            tooltip.style.fontSize = "14px";
+            tooltip.style.whiteSpace = "nowrap";
+            tooltip.style.zIndex = "1000";
+            tooltip.style.pointerEvents = "none";
+            e.currentTarget.appendChild(tooltip);
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "rgba(0,0,0,0.8)";
+            e.currentTarget.style.transform = "scale(1)";
+            // Remove tooltip
+            const tooltip = e.currentTarget.querySelector("div");
+            if (tooltip) tooltip.remove();
+          }}
+        >
+          <FaHome
+            style={{ color: showRecentlyPlayed ? "#ff6b6b" : "#1DB954" }}
+          />
+        </button>
+
+        {/* Like Menu Button */}
+        <button
+          onClick={() => setShowLikeMenu(!showLikeMenu)}
+          title={showLikeMenu ? "Close Menu" : "Open Menu"}
+          style={{
+            color: "white",
+            background: "rgba(0,0,0,0.8)",
+            padding: "12px",
+            borderRadius: "8px",
+            border: "1px solid rgba(255,255,255,0.1)",
+            fontSize: "16px",
+            backdropFilter: "blur(10px)",
+            cursor: "pointer",
+            transition: "all 0.2s ease",
+            boxShadow: showLikeMenu
+              ? "0 0 20px rgba(30, 185, 84, 0.3)"
+              : "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "48px",
+            height: "48px",
+            position: "relative",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(0,0,0,0.9)";
+            e.currentTarget.style.transform = "scale(1.05)";
+            // Show tooltip
+            const tooltip = document.createElement("div");
+            tooltip.textContent = showLikeMenu ? "Close Menu" : "Open Menu";
+            tooltip.style.position = "absolute";
+            tooltip.style.right = "60px";
+            tooltip.style.top = "50%";
+            tooltip.style.transform = "translateY(-50%)";
+            tooltip.style.background = "rgba(0,0,0,0.9)";
+            tooltip.style.color = "white";
+            tooltip.style.padding = "8px 12px";
+            tooltip.style.borderRadius = "6px";
+            tooltip.style.fontSize = "14px";
+            tooltip.style.whiteSpace = "nowrap";
+            tooltip.style.zIndex = "1000";
+            tooltip.style.pointerEvents = "none";
+            e.currentTarget.appendChild(tooltip);
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "rgba(0,0,0,0.8)";
+            e.currentTarget.style.transform = "scale(1)";
+            // Remove tooltip
+            const tooltip = e.currentTarget.querySelector("div");
+            if (tooltip) tooltip.remove();
+          }}
+        >
+          <FaHeart style={{ color: showLikeMenu ? "#ff6b6b" : "#1DB954" }} />
+        </button>
+      </div>
 
       {/* Spotify-like player panel - hidden during balloon ride */}
       {currentStation && !isBalloonRiding && (
@@ -1114,28 +1412,6 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
               borderTop: "1px solid rgba(255,255,255,0.1)",
             }}
           >
-            {/* Hidden audio element */}
-            <audio
-              ref={(audio) => setAudioRef(audio)}
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
-              onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-              onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
-              onLoadStart={() => setIsLoading(true)}
-              onCanPlay={() => setIsLoading(false)}
-              onError={(e) => {
-                console.error("Audio error:", e);
-                setIsPlaying(false);
-                setIsLoading(false);
-                if (currentStation) {
-                  setUnavailableStations(
-                    (prev) => new Set([...prev, currentStation.stationuuid])
-                  );
-                }
-              }}
-              style={{ display: "none" }}
-            />
-
             {/* Progress Bar */}
             <div style={{ marginBottom: "15px" }}>
               <input
@@ -1479,6 +1755,291 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
             {aiRecommendation.message}
           </div>
         </div>
+      )}
+
+      {/* Balloon Ride Guessing */}
+      {isGuessing && balloonStation && (
+        <div
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            background: "rgba(0,0,0,0.95)",
+            color: "white",
+            padding: "24px 32px",
+            borderRadius: "16px",
+            border: "2px solid #1DB954",
+            backdropFilter: "blur(10px)",
+            boxShadow: "0 12px 40px rgba(0,0,0,0.7)",
+            zIndex: 60,
+            minWidth: "350px",
+            textAlign: "center",
+            animation: "fadeIn 0.4s ease-out",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "24px",
+              fontWeight: "700",
+              marginBottom: "16px",
+              color: "#1DB954",
+            }}
+          >
+            🎈 Balloon Ride
+          </div>
+          <div style={{ fontSize: "18px", marginBottom: "20px", opacity: 0.9 }}>
+            Guess the country!
+          </div>
+          <div style={{ fontSize: "16px", marginBottom: "16px", opacity: 0.8 }}>
+            Now playing: {balloonStation.name}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "12px",
+              marginBottom: "20px",
+            }}
+          >
+            <input
+              type="text"
+              placeholder="Enter country name..."
+              value={guessCountry}
+              onChange={(e) => setGuessCountry(e.target.value)}
+              style={{
+                padding: "12px",
+                borderRadius: "8px",
+                border: "1px solid rgba(255,255,255,0.3)",
+                background: "rgba(255,255,255,0.1)",
+                color: "white",
+                fontSize: "16px",
+                textAlign: "center",
+              }}
+              onKeyPress={(e) => e.key === "Enter" && checkGuess()}
+            />
+          </div>
+          <div
+            style={{ display: "flex", gap: "12px", justifyContent: "center" }}
+          >
+            <button
+              onClick={checkGuess}
+              style={{
+                padding: "12px 20px",
+                borderRadius: "8px",
+                border: "none",
+                background: "#1DB954",
+                color: "white",
+                fontSize: "16px",
+                fontWeight: "600",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+              }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "#17a34a")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.background = "#1DB954")
+              }
+            >
+              Guess (+10 points)
+            </button>
+            <button
+              onClick={giveUp}
+              style={{
+                padding: "12px 20px",
+                borderRadius: "8px",
+                border: "1px solid rgba(255,255,255,0.3)",
+                background: "rgba(255,255,255,0.1)",
+                color: "white",
+                fontSize: "16px",
+                fontWeight: "600",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+              }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "rgba(255,255,255,0.2)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.background = "rgba(255,255,255,0.1)")
+              }
+            >
+              Give Up
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Recently Played Overlay */}
+      {showRecentlyPlayed && (
+        <>
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 z-40"
+            onClick={() => setShowRecentlyPlayed(false)}
+          />
+          <div className="fixed inset-0 flex items-center justify-center p-4 z-50">
+            <div className="relative bg-gray-900 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between p-6 border-b border-gray-800">
+                <h1 className="text-2xl font-bold text-white">
+                  🕒 Recently Played
+                </h1>
+                <button
+                  onClick={() => setShowRecentlyPlayed(false)}
+                  className="text-gray-400 hover:text-white transition-colors p-2 rounded-full hover:bg-gray-800"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Stations List */}
+              <div className="flex-1 overflow-y-auto">
+                {recentlyPlayed.length === 0 ? (
+                  <div className="p-8 text-center text-gray-400">
+                    <FaHome className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                    <p>No recently played stations yet</p>
+                    <p className="text-sm mt-2">
+                      Start listening to some stations!
+                    </p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-800">
+                    {recentlyPlayed.map((station, index) => (
+                      <div
+                        key={`${station.stationuuid}-${index}`}
+                        className="p-4 hover:bg-gray-800 transition-colors group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-green-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  className="h-5 w-5 text-white"
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                >
+                                  <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" />
+                                </svg>
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <h3 className="text-white font-medium truncate">
+                                  {station.name}
+                                </h3>
+                                <p className="text-gray-400 text-sm truncate">
+                                  {station.city ? `${station.city}, ` : ""}
+                                  {station.country}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 ml-4">
+                            <button
+                              onClick={() => {
+                                if (
+                                  unavailableStations.has(station.stationuuid)
+                                ) {
+                                  alert(
+                                    `${station.name} is currently unavailable`
+                                  );
+                                  return;
+                                }
+                                // Stop previous audio if playing
+                                if (audioRef && !audioRef.paused) {
+                                  audioRef.pause();
+                                }
+                                setAudioEnabled(true);
+                                setCurrentStation(station);
+                                setIsPlaying(true);
+                                setShowRecentlyPlayed(false); // Close menu
+                                // Auto-play immediately
+                                if (audioRef) {
+                                  audioRef.src = station.url;
+                                  audioRef.volume = volume;
+                                  audioRef
+                                    .play()
+                                    .catch((e) =>
+                                      console.log("Auto-play failed:", e)
+                                    );
+                                }
+                              }}
+                              className={`p-2 rounded-lg transition-all ${
+                                unavailableStations.has(station.stationuuid)
+                                  ? "text-red-400 cursor-not-allowed"
+                                  : "text-gray-400 hover:bg-gray-700 hover:text-white"
+                              }`}
+                              title={
+                                unavailableStations.has(station.stationuuid)
+                                  ? "Unavailable"
+                                  : "Play"
+                              }
+                            >
+                              {unavailableStations.has(station.stationuuid) ? (
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  className="h-5 w-5"
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                >
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                              ) : (
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  className="h-5 w-5"
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                >
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-gray-800">
+                <button
+                  onClick={() => {
+                    setRecentlyPlayed([]);
+                    localStorage.removeItem("recentlyPlayedStations");
+                  }}
+                  className="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+                  disabled={recentlyPlayed.length === 0}
+                >
+                  Clear History
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Like Menu Overlay */}
