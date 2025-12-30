@@ -226,14 +226,14 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
 
   // Load/save points
   useEffect(() => {
-    const loadPoints = () => {
+    const loadPoints = async () => {
       // Use local storage manager
-      const userData = LocalStorageManager.getUserData(userId);
+      const userData = await LocalStorageManager.getUserData(userId);
       if (userData) {
         setPoints(userData.points || 0);
       } else {
         // Initialize user
-        const newUser = LocalStorageManager.initializeUser(userId);
+        const newUser = await LocalStorageManager.initializeUser(userId);
         setPoints(newUser.points || 0);
       }
     };
@@ -242,17 +242,20 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
 
   // Save points to local storage manager
   useEffect(() => {
-    LocalStorageManager.saveUserData(userId, {
-      points,
-      email: user?.primaryEmailAddress?.emailAddress || undefined,
-      displayName: user?.fullName || user?.firstName || undefined,
-      username: user?.username || undefined,
-    });
-    LocalStorageManager.updateLeaderboard(userId, points, {
-      email: user?.primaryEmailAddress?.emailAddress || undefined,
-      displayName: user?.fullName || user?.firstName || undefined,
-      username: user?.username || undefined,
-    });
+    const savePoints = async () => {
+      await LocalStorageManager.saveUserData(userId, {
+        points,
+        email: user?.primaryEmailAddress?.emailAddress || undefined,
+        displayName: user?.fullName || user?.firstName || undefined,
+        username: user?.username || undefined,
+      });
+      await LocalStorageManager.updateLeaderboard(userId, points, {
+        email: user?.primaryEmailAddress?.emailAddress || undefined,
+        displayName: user?.fullName || user?.firstName || undefined,
+        username: user?.username || undefined,
+      });
+    };
+    savePoints();
   }, [points, userId, user]);
 
   // Keyboard shortcuts
@@ -544,7 +547,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     };
 
     // Save to local storage
-    LocalStorageManager.addGuess(userId, guessData);
+    await LocalStorageManager.addGuess(userId, guessData);
     console.log("Give up saved to local storage");
 
     if (isCorrect === true) {
@@ -554,8 +557,8 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       setPoints(newPoints); // Award 10 points for correct guess
 
       // Immediately save points
-      LocalStorageManager.saveUserData(userId, { points: newPoints });
-      LocalStorageManager.updateLeaderboard(userId, newPoints);
+      await LocalStorageManager.saveUserData(userId, { points: newPoints });
+      await LocalStorageManager.updateLeaderboard(userId, newPoints);
       console.log("Points saved to local storage:", newPoints);
 
       setGuessFeedback({
@@ -588,7 +591,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     };
 
     // Save to local storage
-    LocalStorageManager.addGuess(userId, guessData);
+    await LocalStorageManager.addGuess(userId, guessData);
     console.log("Guess saved to local storage");
 
     // Show the answer and end the ride

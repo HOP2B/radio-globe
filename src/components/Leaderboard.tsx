@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import LocalStorageManager from "../utils/localStorageManager";
 
-interface UserData {
+interface LeaderboardEntry {
   id: string;
   points: number;
   email?: string;
@@ -9,82 +9,58 @@ interface UserData {
   username?: string;
 }
 
-const Leaderboard: React.FC = () => {
-  const [leaderboard, setLeaderboard] = useState<UserData[]>([]);
+export default function Leaderboard() {
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  // Local user ID for highlighting current user
-  const currentUserId = "local-user";
+
+  const loadLeaderboard = async () => {
+    setLoading(true);
+    const data = await LocalStorageManager.getLeaderboard();
+    setLeaderboard(data);
+    setLoading(false);
+  };
 
   useEffect(() => {
-    const fetchLeaderboard = () => {
-      try {
-        // Use local storage manager to get leaderboard data
-        const leaderboardData = LocalStorageManager.getLeaderboard();
-        setLeaderboard(leaderboardData);
-      } catch (error) {
-        console.error("Error fetching leaderboard:", error);
-        // Don't show error to user, just show empty leaderboard
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchLeaderboard();
+    loadLeaderboard();
   }, []);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+      <div className="flex justify-center p-6 text-white">
+        Loading leaderboard…
       </div>
     );
   }
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <h2 className="text-2xl font-bold text-white mb-6 text-center">
+    <div className="max-w-xl mx-auto bg-black bg-opacity-80 rounded-lg p-6">
+      <h2 className="text-2xl font-bold text-white mb-4 text-center">
         🏆 Leaderboard
       </h2>
-      <div className="bg-black bg-opacity-80 rounded-lg p-6 backdrop-blur-sm">
-        {leaderboard.length === 0 ? (
-          <p className="text-gray-400 text-center">
-            No players yet. Be the first!
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {leaderboard.map((player, index) => (
-              <div
-                key={player.id}
-                className={`flex items-center justify-between p-4 rounded-lg ${
-                  player.id === currentUserId
-                    ? "bg-green-900 bg-opacity-50 border border-green-500"
-                    : "bg-gray-800 bg-opacity-50"
-                }`}
-              >
-                <div className="flex items-center gap-4">
-                  <div className="text-2xl font-bold text-yellow-400 w-8">
-                    {index + 1}
-                  </div>
-                  <div>
-                    <div className="text-white font-medium">
-                      {player.displayName ||
-                        player.username ||
-                        player.email ||
-                        "Anonymous"}
-                      {player.id === currentUserId && " (You)"}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-xl font-bold text-green-400">
-                  {player.points} pts
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+
+      {leaderboard.length === 0 ? (
+        <p className="text-gray-400 text-center">No players yet</p>
+      ) : (
+        <ul className="space-y-2">
+          {leaderboard.map((player, index) => (
+            <li
+              key={player.id}
+              className="flex justify-between bg-gray-800 rounded p-3 text-white"
+            >
+              <span>
+                <strong>{index + 1}.</strong>{" "}
+                {player.displayName ||
+                  player.username ||
+                  player.email ||
+                  "Anonymous"}
+              </span>
+              <span className="text-green-400 font-bold">
+                {player.points} pts
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
-};
-
-export default Leaderboard;
+}
