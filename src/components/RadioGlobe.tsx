@@ -161,6 +161,12 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     station: RadioStation;
     message: string;
   } | null>(null);
+  const [balloonNotification, setBalloonNotification] = useState<{
+    message: string;
+    type: "info" | "success";
+  } | null>(null);
+  const [showTutorial, setShowTutorial] = useState(true); // Always show tutorial
+  const [showConfetti, setShowConfetti] = useState(false);
   const [hoveredStation, setHoveredStation] = useState<RadioStation | null>(
     null
   );
@@ -178,6 +184,34 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   const controlsRef = useRef<any>(null);
   const cameraRef = useRef<any>(null);
   const radius = 5;
+
+  // Sound effects
+  const playSound = (frequency: number, duration: number = 200) => {
+    try {
+      const audioContext = new (window.AudioContext ||
+        (window as any).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.frequency.value = frequency;
+      oscillator.type = "sine";
+
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(
+        0.01,
+        audioContext.currentTime + duration / 1000
+      );
+
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + duration / 1000);
+    } catch (e) {
+      // Fallback: no sound on error
+      console.log("Sound effect:", frequency === 800 ? "Correct!" : "Wrong!");
+    }
+  };
 
   // Handle audio setup when station changes
   useEffect(() => {
@@ -468,6 +502,16 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     setIsBalloonRiding(true);
     setZoomProgress(0); // Reset zoom progress
 
+    // Don't hide tutorial permanently - let it show on next visit
+
+    // Show notification
+    setBalloonNotification({
+      message: "🎈 Balloon Ride started! Guess the country for 10 points!",
+      type: "info",
+    });
+    // Auto-hide notification after 5 seconds
+    setTimeout(() => setBalloonNotification(null), 5000);
+
     // Set current station and play
     setCurrentStation(randomStation);
     setIsPlaying(true);
@@ -556,13 +600,20 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       console.log("Awarding points:", points, "->", newPoints);
       setPoints(newPoints); // Award 10 points for correct guess
 
+      // Play success sound
+      playSound(800, 300); // Higher pitch for success
+
+      // Show confetti
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 3000);
+
       // Immediately save points
       await LocalStorageManager.saveUserData(userId, { points: newPoints });
       await LocalStorageManager.updateLeaderboard(userId, newPoints);
       console.log("Points saved to local storage:", newPoints);
 
       setGuessFeedback({
-        message: "Correct! +10 points awarded!",
+        message: "🎉 Correct! +10 points awarded!",
         type: "correct",
       });
       // End the ride after a short delay to show the success message
@@ -572,6 +623,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       }, 2000);
     } else {
       // Wrong guess - show feedback
+      playSound(300, 200); // Lower pitch for wrong
       setGuessFeedback({
         message: `Wrong guess! Try again or give up.`,
         type: "wrong",
@@ -1342,25 +1394,18 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         <button
           onClick={startBalloonRide}
           disabled={radios.length === 0}
-          title={radios.length === 0 ? "Loading stations..." : "Balloon Ride"}
-          style={{
-            color: "white",
-            background:
-              radios.length === 0 ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.8)",
-            padding: "12px",
-            borderRadius: "8px",
-            border: "1px solid rgba(255,255,255,0.1)",
-            fontSize: "16px",
-            backdropFilter: "blur(10px)",
-            cursor: radios.length === 0 ? "not-allowed" : "pointer",
-            transition: "all 0.2s ease",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: "48px",
-            height: "48px",
-            position: "relative",
-          }}
+          title={
+            radios.length === 0
+              ? "Loading stations..."
+              : "Balloon Ride - Guess countries for points!"
+          }
+          className={`text-white p-3 rounded-xl border-2 font-medium backdrop-blur-md cursor-pointer transition-all duration-300 flex items-center justify-center w-13 h-13 relative ${
+            radios.length === 0
+              ? "bg-black/50 cursor-not-allowed"
+              : isBalloonRiding
+              ? "bg-orange-500/90 border-orange-400 shadow-lg shadow-orange-500/60"
+              : "bg-black/80 border-white/20 hover:bg-black/90 animate-pulse shadow-lg shadow-sky-500/40"
+          }`}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = "rgba(0,0,0,0.9)";
             e.currentTarget.style.transform = "scale(1.05)";
@@ -1969,6 +2014,188 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         </div>
       )}
 
+      {/* Balloon Ride Notification */}
+      {balloonNotification && (
+        <div
+          style={{
+            position: "absolute",
+            top: 140,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "rgba(0,0,0,0.9)",
+            color: "white",
+            padding: "16px 24px",
+            borderRadius: "12px",
+            border: "1px solid rgba(255,255,255,0.2)",
+            backdropFilter: "blur(10px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+            zIndex: 50,
+            maxWidth: "400px",
+            textAlign: "center",
+            animation: "fadeIn 0.3s ease-out",
+          }}
+        >
+          <div
+            style={{ fontSize: "18px", fontWeight: "600", marginBottom: "8px" }}
+          >
+            🎈 Balloon Ride Started!
+          </div>
+          <div style={{ fontSize: "14px", opacity: 0.9 }}>
+            {balloonNotification.message}
+          </div>
+        </div>
+      )}
+
+      {/* Confetti Effect */}
+      {showConfetti && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            pointerEvents: "none",
+            zIndex: 90,
+          }}
+        >
+          {Array.from({ length: 50 }).map((_, i) => (
+            <div
+              key={i}
+              style={{
+                position: "absolute",
+                left: `${Math.random() * 100}%`,
+                top: "-10px",
+                width: "10px",
+                height: "10px",
+                background: [
+                  "#ff6b6b",
+                  "#4ecdc4",
+                  "#45b7d1",
+                  "#f9ca24",
+                  "#f0932b",
+                ][Math.floor(Math.random() * 5)],
+                borderRadius: "50%",
+                animation: `confetti ${
+                  2 + Math.random() * 2
+                }s ease-out forwards`,
+                animationDelay: `${Math.random() * 0.5}s`,
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Tutorial Overlay */}
+      {showTutorial && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.8)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            animation: "fadeIn 0.5s ease-out",
+          }}
+          onClick={() => setShowTutorial(false)}
+        >
+          <div
+            style={{
+              background: "rgba(0,0,0,0.95)",
+              color: "white",
+              padding: "32px",
+              borderRadius: "16px",
+              border: "2px solid #1DB954",
+              maxWidth: "500px",
+              textAlign: "center",
+              backdropFilter: "blur(10px)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: "32px", marginBottom: "16px" }}>🎈</div>
+            <h2
+              style={{
+                fontSize: "24px",
+                fontWeight: "700",
+                marginBottom: "16px",
+                color: "#1DB954",
+              }}
+            >
+              Welcome to Balloon Ride!
+            </h2>
+            <div
+              style={{
+                fontSize: "16px",
+                lineHeight: "1.6",
+                marginBottom: "24px",
+              }}
+            >
+              <p>🎵 Listen to radio stations from around the world</p>
+              <p>🎯 Guess the country to earn 10 points each!</p>
+              <p>🏆 Compete on the leaderboard</p>
+              <p>✨ Click the pulsing cloud button to start!</p>
+            </div>
+            <div
+              style={{ display: "flex", gap: "12px", justifyContent: "center" }}
+            >
+              <button
+                onClick={() => setShowTutorial(false)}
+                style={{
+                  background: "#1DB954",
+                  color: "white",
+                  border: "none",
+                  padding: "12px 24px",
+                  borderRadius: "8px",
+                  fontSize: "16px",
+                  fontWeight: "600",
+                  cursor: "pointer",
+                  transition: "all 0.2s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#17a34a";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "#1DB954";
+                }}
+              >
+                Got it! Let's Play 🎈
+              </button>
+              <button
+                onClick={() => {
+                  localStorage.removeItem("hasPlayedBalloonRide");
+                  setShowTutorial(true);
+                }}
+                style={{
+                  background: "transparent",
+                  color: "rgba(255,255,255,0.6)",
+                  border: "1px solid rgba(255,255,255,0.3)",
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                  transition: "all 0.2s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = "white";
+                  e.currentTarget.style.borderColor = "rgba(255,255,255,0.6)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = "rgba(255,255,255,0.6)";
+                  e.currentTarget.style.borderColor = "rgba(255,255,255,0.3)";
+                }}
+              >
+                Reset Tutorial
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Balloon Ride Guessing */}
       {isGuessing && balloonStation && (
         <div
@@ -2361,6 +2588,24 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           </div>
         </>
       )}
+
+      {/* Global styles for animations */}
+      <style>{`
+        @keyframes confetti {
+          0% {
+            transform: translateY(-10px) rotate(0deg);
+            opacity: 1;
+          }
+          100% {
+            transform: translateY(100vh) rotate(720deg);
+            opacity: 0;
+          }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
