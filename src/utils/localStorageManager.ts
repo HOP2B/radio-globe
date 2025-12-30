@@ -4,6 +4,9 @@
 interface UserData {
   id: string;
   points: number;
+  email?: string;
+  displayName?: string;
+  username?: string;
   guesses: Array<{
     stationName: string;
     stationCountry: string;

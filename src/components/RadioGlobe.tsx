@@ -244,14 +244,14 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   useEffect(() => {
     LocalStorageManager.saveUserData(userId, {
       points,
-      email: user?.primaryEmailAddress?.emailAddress,
-      displayName: user?.fullName || user?.firstName,
-      username: user?.username,
+      email: user?.primaryEmailAddress?.emailAddress || undefined,
+      displayName: user?.fullName || user?.firstName || undefined,
+      username: user?.username || undefined,
     });
     LocalStorageManager.updateLeaderboard(userId, points, {
-      email: user?.primaryEmailAddress?.emailAddress,
-      displayName: user?.fullName || user?.firstName,
-      username: user?.username,
+      email: user?.primaryEmailAddress?.emailAddress || undefined,
+      displayName: user?.fullName || user?.firstName || undefined,
+      username: user?.username || undefined,
     });
   }, [points, userId, user]);
 
