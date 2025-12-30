@@ -167,6 +167,8 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   } | null>(null);
   const [showTutorial, setShowTutorial] = useState(true); // Always show tutorial
   const [showConfetti, setShowConfetti] = useState(false);
+  const [guessTimeLeft, setGuessTimeLeft] = useState(30); // 30 second timer
+  const [guessStreak, setGuessStreak] = useState(0); // Consecutive correct guesses
   const [hoveredStation, setHoveredStation] = useState<RadioStation | null>(
     null
   );
@@ -291,6 +293,24 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     };
     savePoints();
   }, [points, userId, user]);
+
+  // Countdown timer for guessing
+  useEffect(() => {
+    let interval: number;
+    if (isGuessing && guessTimeLeft > 0) {
+      interval = setInterval(() => {
+        setGuessTimeLeft((prev) => {
+          if (prev <= 1) {
+            // Time's up! Auto-submit wrong guess
+            handleTimeout();
+            return 30; // Reset for next guess
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isGuessing, guessTimeLeft]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -490,17 +510,57 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       return;
     }
 
-    const randomStation = radios[Math.floor(Math.random() * radios.length)];
-    if (!randomStation) {
+    // Weighted selection: 85% Mexico, 15% other countries for more Mexican focus
+    let selectedStation: RadioStation;
+
+    if (Math.random() < 0.85) {
+      // 85% chance: Select from Mexican stations
+      const mexicanStations = radios.filter(
+        (station) =>
+          station.country?.toLowerCase().includes("mexico") ||
+          station.country?.toLowerCase() === "mexico"
+      );
+
+      if (mexicanStations.length > 0) {
+        // Pick a random Mexican station
+        selectedStation =
+          mexicanStations[Math.floor(Math.random() * mexicanStations.length)];
+      } else {
+        // Fallback to random if no Mexican stations
+        selectedStation = radios[Math.floor(Math.random() * radios.length)];
+      }
+    } else {
+      // 15% chance: Select from non-Mexican stations for variety
+      const nonMexicanStations = radios.filter(
+        (station) =>
+          !station.country?.toLowerCase().includes("mexico") &&
+          station.country?.toLowerCase() !== "mexico" &&
+          station.country // Make sure country exists
+      );
+
+      if (nonMexicanStations.length > 0) {
+        // Spread selection across different countries
+        selectedStation =
+          nonMexicanStations[
+            Math.floor(Math.random() * nonMexicanStations.length)
+          ];
+      } else {
+        // Fallback to random if all stations are Mexican
+        selectedStation = radios[Math.floor(Math.random() * radios.length)];
+      }
+    }
+
+    if (!selectedStation) {
       console.error("Failed to select random station");
       return;
     }
 
-    setBalloonStation(randomStation);
+    setBalloonStation(selectedStation);
     setGuessCountry("");
     setIsGuessing(true);
     setIsBalloonRiding(true);
     setZoomProgress(0); // Reset zoom progress
+    setGuessTimeLeft(30); // Reset timer
 
     // Don't hide tutorial permanently - let it show on next visit
 
@@ -513,10 +573,10 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     setTimeout(() => setBalloonNotification(null), 5000);
 
     // Set current station and play
-    setCurrentStation(randomStation);
+    setCurrentStation(selectedStation);
     setIsPlaying(true);
     if (audioRef) {
-      audioRef.src = randomStation.url;
+      audioRef.src = selectedStation.url;
       audioRef.volume = volume;
       audioRef.play().catch((e) => console.log("Auto-play failed:", e));
     }
@@ -524,8 +584,8 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     // Move camera to station with smooth animation
     if (cameraRef.current && controlsRef.current) {
       const pos = latLngToXYZ(
-        randomStation.latitude!,
-        randomStation.longitude!,
+        selectedStation.latitude!,
+        selectedStation.longitude!,
         radius + 0.5
       );
 
@@ -596,9 +656,22 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
 
     if (isCorrect === true) {
       console.log("Correct guess detected!");
-      const newPoints = points + 10;
-      console.log("Awarding points:", points, "->", newPoints);
-      setPoints(newPoints); // Award 10 points for correct guess
+      const streakBonus = Math.floor(guessStreak / 3) * 5; // Bonus every 3 streaks
+      const basePoints = 10;
+      const totalPoints = basePoints + streakBonus;
+      const newPoints = points + totalPoints;
+      const newStreak = guessStreak + 1;
+
+      console.log(
+        "Awarding points:",
+        points,
+        "->",
+        newPoints,
+        "Streak:",
+        newStreak
+      );
+      setPoints(newPoints);
+      setGuessStreak(newStreak);
 
       // Play success sound
       playSound(800, 300); // Higher pitch for success
@@ -612,8 +685,9 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       await LocalStorageManager.updateLeaderboard(userId, newPoints);
       console.log("Points saved to local storage:", newPoints);
 
+      const bonusText = streakBonus > 0 ? ` +${streakBonus} streak bonus!` : "";
       setGuessFeedback({
-        message: "🎉 Correct! +10 points awarded!",
+        message: `🎉 Correct! +${totalPoints} points awarded!${bonusText}`,
         type: "correct",
       });
       // End the ride after a short delay to show the success message
@@ -622,6 +696,9 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         endBalloonRide();
       }, 2000);
     } else {
+      // Wrong guess - reset streak
+      setGuessStreak(0);
+
       // Wrong guess - show feedback
       playSound(300, 200); // Lower pitch for wrong
       setGuessFeedback({
@@ -646,9 +723,44 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     await LocalStorageManager.addGuess(userId, guessData);
     console.log("Guess saved to local storage");
 
+    // Reset streak on wrong guess
+    setGuessStreak(0);
+
     // Show the answer and end the ride
     setGuessFeedback({
       message: `The country was: ${balloonStation.country}`,
+      type: "wrong",
+    });
+
+    // End balloon ride after showing the answer
+    setTimeout(() => {
+      endBalloonRide();
+    }, 3000);
+  };
+
+  const handleTimeout = async () => {
+    if (!balloonStation) return;
+
+    // Play timeout sound
+    playSound(200, 500); // Low, long beep for timeout
+
+    const guessData = {
+      stationName: balloonStation.name,
+      stationCountry: balloonStation.country,
+      guessedCountry: "", // Timeout
+      isCorrect: false,
+      timestamp: new Date(),
+    };
+
+    // Save to local storage
+    await LocalStorageManager.addGuess(userId, guessData);
+
+    // Reset streak on timeout
+    setGuessStreak(0);
+
+    // Show timeout message
+    setGuessFeedback({
+      message: `⏰ Time's up! The country was: ${balloonStation.country}`,
       type: "wrong",
     });
 
@@ -1893,38 +2005,40 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         </div>
       )}
 
-      {/* Enjoy Project Text */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 20,
-          right: 20,
-          color: "white",
-          background: "rgba(0,0,0,0.8)",
-          padding: "8px 12px",
-          borderRadius: "6px",
-          border: "1px solid rgba(255,255,255,0.1)",
-          fontSize: "12px",
-          fontWeight: "400",
-          backdropFilter: "blur(10px)",
-          textAlign: "center",
-          display: "flex",
-          alignItems: "center",
-          gap: "6px",
-        }}
-      >
-        {currentStation ? (
-          <>
-            <HiSpeakerWave style={{ color: "#1DB954" }} />
-            Listening to {currentStation.country} Radio
-          </>
-        ) : (
-          <>
-            <FaGlobe style={{ color: "#1DB954" }} />
-            Enjoy our project!
-          </>
-        )}
-      </div>
+      {/* Enjoy Project Text - Hidden during balloon ride */}
+      {!isBalloonRiding && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 20,
+            right: 20,
+            color: "white",
+            background: "rgba(0,0,0,0.8)",
+            padding: "8px 12px",
+            borderRadius: "6px",
+            border: "1px solid rgba(255,255,255,0.1)",
+            fontSize: "12px",
+            fontWeight: "400",
+            backdropFilter: "blur(10px)",
+            textAlign: "center",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+          }}
+        >
+          {currentStation ? (
+            <>
+              <HiSpeakerWave style={{ color: "#1DB954" }} />
+              Listening to {currentStation.country} Radio
+            </>
+          ) : (
+            <>
+              <FaGlobe style={{ color: "#1DB954" }} />
+              Enjoy our project!
+            </>
+          )}
+        </div>
+      )}
 
       {/* Station Info Tooltip */}
       {hoveredStation && (
@@ -2233,6 +2347,38 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           </div>
           <div style={{ fontSize: "16px", marginBottom: "16px", opacity: 0.8 }}>
             Now playing: {balloonStation.name}
+          </div>
+
+          {/* Timer and Streak Display */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginBottom: "16px",
+              fontSize: "14px",
+            }}
+          >
+            <div
+              style={{
+                color:
+                  guessTimeLeft <= 10
+                    ? "#ef4444"
+                    : guessTimeLeft <= 20
+                    ? "#f59e0b"
+                    : "#10b981",
+                fontWeight: "bold",
+              }}
+            >
+              ⏰ {guessTimeLeft}s
+            </div>
+            <div
+              style={{
+                color: guessStreak > 0 ? "#f59e0b" : "#6b7280",
+                fontWeight: guessStreak > 0 ? "bold" : "normal",
+              }}
+            >
+              🔥 {guessStreak} streak
+            </div>
           </div>
 
           {/* Feedback Message */}
