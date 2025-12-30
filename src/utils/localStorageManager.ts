@@ -1,5 +1,18 @@
-// Local Storage Manager - Replaces Firebase functionality
-// Provides a simple interface for storing and retrieving user data locally
+// Firestore Manager - Replaces localStorage functionality
+// Provides a permanent storage interface using Firebase Firestore
+
+import { db } from "../firebase";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  collection,
+  query,
+  orderBy,
+  limit,
+  getDocs,
+} from "firebase/firestore";
 
 interface UserData {
   id: string;
@@ -25,45 +38,39 @@ interface LeaderboardEntry {
 }
 
 export const LocalStorageManager = {
-  // User data storage key
-  USER_DATA_KEY: "radioGlobeUserData",
-
-  // Leaderboard data storage key
-  LEADERBOARD_KEY: "radioGlobeLeaderboard",
-
   /**
-   * Get user data from local storage
+   * Get user data from Firestore
    */
-  getUserData(userId: string): UserData | null {
+  async getUserData(userId: string): Promise<UserData | null> {
     try {
-      const allUsersData = localStorage.getItem(this.USER_DATA_KEY);
-      if (!allUsersData) return null;
-
-      const users = JSON.parse(allUsersData) as Record<string, UserData>;
-      return users[userId] || null;
+      const docRef = doc(db, "users", userId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        return { id: docSnap.id, ...docSnap.data() } as UserData;
+      }
+      return null;
     } catch (error) {
-      console.error("Error reading user data:", error);
+      console.error("Error getting user data:", error);
       return null;
     }
   },
 
   /**
-   * Save user data to local storage
+   * Save user data to Firestore
    */
-  saveUserData(userId: string, userData: Partial<UserData>) {
+  async saveUserData(userId: string, userData: Partial<UserData>) {
     try {
-      const allUsersData = localStorage.getItem(this.USER_DATA_KEY);
-      const users = allUsersData ? JSON.parse(allUsersData) : {};
-
-      // Merge with existing data
-      const existingUser = users[userId] || {
-        id: userId,
-        points: 0,
-        guesses: [],
-      };
-      users[userId] = { ...existingUser, ...userData };
-
-      localStorage.setItem(this.USER_DATA_KEY, JSON.stringify(users));
+      const docRef = doc(db, "users", userId);
+      const existing = await getDoc(docRef);
+      // Filter out undefined values
+      const cleanData = Object.fromEntries(
+        Object.entries(userData).filter(([, v]) => v !== undefined)
+      );
+      if (existing.exists()) {
+        await updateDoc(docRef, cleanData);
+      } else {
+        await setDoc(docRef, { ...cleanData, id: userId });
+      }
     } catch (error) {
       console.error("Error saving user data:", error);
     }
@@ -72,9 +79,9 @@ export const LocalStorageManager = {
   /**
    * Initialize user if they don't exist
    */
-  initializeUser(userId: string): UserData {
-    const existingUser = this.getUserData(userId);
-    if (existingUser) return existingUser;
+  async initializeUser(userId: string): Promise<UserData> {
+    const existing = await this.getUserData(userId);
+    if (existing) return existing;
 
     const newUser: UserData = {
       id: userId,
@@ -82,37 +89,28 @@ export const LocalStorageManager = {
       guesses: [],
     };
 
-    this.saveUserData(userId, newUser);
+    await this.saveUserData(userId, newUser);
     return newUser;
   },
 
   /**
-   * Get leaderboard data
+   * Get leaderboard data from Firestore
    */
-  getLeaderboard(): LeaderboardEntry[] {
+  async getLeaderboard(): Promise<LeaderboardEntry[]> {
     try {
-      // Try to get cached leaderboard first
-      const cachedLeaderboard = localStorage.getItem(this.LEADERBOARD_KEY);
-      if (cachedLeaderboard) {
-        return JSON.parse(cachedLeaderboard);
-      }
-
-      // Fallback: generate leaderboard from user data
-      const allUsersData = localStorage.getItem(this.USER_DATA_KEY);
-      if (!allUsersData) return [];
-
-      const users = JSON.parse(allUsersData) as Record<string, UserData>;
-
-      return Object.values(users)
-        .map((user) => ({
-          id: user.id,
-          points: user.points,
-          // Add some mock display info for better UX
-          displayName: `Player ${user.id.substring(0, 6)}`,
-          username: user.id.substring(0, 8),
-        }))
-        .sort((a, b) => b.points - a.points)
-        .slice(0, 10);
+      const q = query(
+        collection(db, "users"),
+        orderBy("points", "desc"),
+        limit(10)
+      );
+      const querySnapshot = await getDocs(q);
+      return querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        points: doc.data().points || 0,
+        email: doc.data().email,
+        displayName: doc.data().displayName,
+        username: doc.data().username,
+      }));
     } catch (error) {
       console.error("Error getting leaderboard:", error);
       return [];
@@ -120,55 +118,20 @@ export const LocalStorageManager = {
   },
 
   /**
-   * Update leaderboard (simulate what would happen with real backend)
+   * Update leaderboard (update user data)
    */
-  updateLeaderboard(
+  async updateLeaderboard(
     userId: string,
     points: number,
     userInfo?: { email?: string; displayName?: string; username?: string }
   ) {
-    try {
-      const leaderboard = this.getLeaderboard();
-      const existingEntry = leaderboard.find((entry) => entry.id === userId);
-
-      if (existingEntry) {
-        existingEntry.points = points;
-        // Update user info if provided
-        if (userInfo) {
-          existingEntry.email = userInfo.email || existingEntry.email;
-          existingEntry.displayName =
-            userInfo.displayName || existingEntry.displayName;
-          existingEntry.username = userInfo.username || existingEntry.username;
-        }
-      } else {
-        leaderboard.push({
-          id: userId,
-          points,
-          email: userInfo?.email,
-          displayName:
-            userInfo?.displayName || `Player ${userId.substring(0, 6)}`,
-          username: userInfo?.username || userId.substring(0, 8),
-        });
-      }
-
-      // Sort and keep top 10
-      const updatedLeaderboard = leaderboard
-        .sort((a, b) => b.points - a.points)
-        .slice(0, 10);
-
-      localStorage.setItem(
-        this.LEADERBOARD_KEY,
-        JSON.stringify(updatedLeaderboard)
-      );
-    } catch (error) {
-      console.error("Error updating leaderboard:", error);
-    }
+    await this.saveUserData(userId, { points, ...userInfo });
   },
 
   /**
    * Add a guess to user's guess history
    */
-  addGuess(
+  async addGuess(
     userId: string,
     guess: {
       stationName: string;
@@ -178,14 +141,30 @@ export const LocalStorageManager = {
       timestamp: Date;
     }
   ) {
-    const userData = this.getUserData(userId);
+    const userData = await this.getUserData(userId);
     if (!userData) {
-      const newUser = this.initializeUser(userId);
+      const newUser = await this.initializeUser(userId);
       newUser.guesses.push(guess);
-      this.saveUserData(userId, newUser);
+      await this.saveUserData(userId, newUser);
     } else {
       userData.guesses.push(guess);
-      this.saveUserData(userId, userData);
+      await this.saveUserData(userId, userData);
+    }
+  },
+
+  /**
+   * Reset all user points to 0
+   */
+  async resetAllPoints() {
+    try {
+      const q = query(collection(db, "users"));
+      const querySnapshot = await getDocs(q);
+      const promises = querySnapshot.docs.map((doc) =>
+        updateDoc(doc.ref, { points: 0 })
+      );
+      await Promise.all(promises);
+    } catch (error) {
+      console.error("Error resetting points:", error);
     }
   },
 };
