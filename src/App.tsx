@@ -99,7 +99,7 @@ const getMockRadios = (): RadioStation[] => {
   return mockStations;
 };
 
-export default function App() {
+function App() {
   const [radios, setRadios] = useState<RadioStation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -126,6 +126,7 @@ export default function App() {
         console.error("Error loading radios:", err);
         const errorMessage =
           err instanceof Error ? err.message : "Failed to load radio stations";
+
         setError(errorMessage);
 
         // Fallback to mock data if API fails
@@ -161,22 +162,5 @@ export default function App() {
       )}
     </div>
   );
-  // return (
-  //   <div>
-  //     <h1>Radio API Test</h1>
-  //     <ApiTest />
-  //   </div>
-  // );
 }
-// import ApiTest from "./components/ApiTest";
-
-// function App() {
-//   return (
-//     <div>
-//       <h1>Radio API Test</h1>
-//       <ApiTest />
-//     </div>
-//   );
-// }
-
-// export default App;
+export default App;

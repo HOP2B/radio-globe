@@ -4,8 +4,12 @@ import { useState, useRef, useEffect } from "react";
 import { Canvas, useLoader, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Sphere, Stars } from "@react-three/drei";
 import { TextureLoader, Vector3 } from "three";
+import { useUser } from "@clerk/clerk-react";
 import type { RadioStation } from "../api/radio";
 import LikeMenu from "./LikeMenu";
+import Leaderboard from "./Leaderboard";
+import Header from "./Header";
+import LocalStorageManager from "../utils/localStorageManager";
 // Icons import
 import {
   FaPlay,
@@ -111,6 +115,9 @@ function RadioDot({
 }
 
 export default function RadioGlobe({ radios }: RadioGlobeProps) {
+  const { user } = useUser();
+  // Use Clerk user ID if available, otherwise fallback to local-user
+  const userId = user?.id || "local-user";
   const [currentStation, setCurrentStation] = useState<RadioStation | null>(
     null
   );
@@ -129,6 +136,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   );
   const [showLikeMenu, setShowLikeMenu] = useState(false); // Hide menu by default
   const [showRecentlyPlayed, setShowRecentlyPlayed] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const menuAnimation = "slide-in";
   const [isBalloonRiding, setIsBalloonRiding] = useState(false);
   const [_zoomProgress, setZoomProgress] = useState(0);
@@ -139,7 +147,12 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   const [balloonStation, setBalloonStation] = useState<RadioStation | null>(
     null
   );
+  const [guessFeedback, setGuessFeedback] = useState<{
+    message: string;
+    type: "correct" | "wrong" | null;
+  }>({ message: "", type: null });
   const [points, setPoints] = useState(() => {
+    // Load from local storage
     const saved = localStorage.getItem("balloonPoints");
     return saved ? parseInt(saved) : 0;
   });
@@ -211,10 +224,36 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     );
   }, [recentlyPlayed]);
 
-  // Save points to localStorage
+  // Load/save points
   useEffect(() => {
-    localStorage.setItem("balloonPoints", points.toString());
-  }, [points]);
+    const loadPoints = () => {
+      // Use local storage manager
+      const userData = LocalStorageManager.getUserData(userId);
+      if (userData) {
+        setPoints(userData.points || 0);
+      } else {
+        // Initialize user
+        const newUser = LocalStorageManager.initializeUser(userId);
+        setPoints(newUser.points || 0);
+      }
+    };
+    loadPoints();
+  }, [userId]);
+
+  // Save points to local storage manager
+  useEffect(() => {
+    LocalStorageManager.saveUserData(userId, {
+      points,
+      email: user?.primaryEmailAddress?.emailAddress,
+      displayName: user?.fullName || user?.firstName,
+      username: user?.username,
+    });
+    LocalStorageManager.updateLeaderboard(userId, points, {
+      email: user?.primaryEmailAddress?.emailAddress,
+      displayName: user?.fullName || user?.firstName,
+      username: user?.username,
+    });
+  }, [points, userId, user]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -409,11 +448,22 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
 
   // Balloon Ride functions
   const startBalloonRide = () => {
+    if (radios.length === 0) {
+      console.warn("No radio stations loaded yet");
+      return;
+    }
+
     const randomStation = radios[Math.floor(Math.random() * radios.length)];
+    if (!randomStation) {
+      console.error("Failed to select random station");
+      return;
+    }
+
     setBalloonStation(randomStation);
     setGuessCountry("");
     setIsGuessing(true);
     setIsBalloonRiding(true);
+    setZoomProgress(0); // Reset zoom progress
 
     // Set current station and play
     setCurrentStation(randomStation);
@@ -424,63 +474,162 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       audioRef.play().catch((e) => console.log("Auto-play failed:", e));
     }
 
-    // Move camera to station
+    // Move camera to station with smooth animation
     if (cameraRef.current && controlsRef.current) {
       const pos = latLngToXYZ(
         randomStation.latitude!,
         randomStation.longitude!,
         radius + 0.5
       );
-      controlsRef.current.reset();
+
+      // Disable controls during balloon ride
+      controlsRef.current.enabled = false;
+
+      // Set target position for smooth transition
       controlsRef.current.target.set(pos[0], pos[1], pos[2]);
       controlsRef.current.update();
-      cameraRef.current.position.set(pos[0], pos[1] + 1, pos[2] + 3);
-      cameraRef.current.lookAt(pos[0], pos[1], pos[2]);
-      controlsRef.current.update();
+
+      // Animate camera position smoothly
+      const startPos = cameraRef.current.position.clone();
+      const endPos = new Vector3(pos[0], pos[1] + 1, pos[2] + 3);
+      let progress = 0;
+
+      const animateCamera = () => {
+        progress += 0.05;
+        if (progress < 1) {
+          cameraRef.current.position.lerpVectors(startPos, endPos, progress);
+          cameraRef.current.lookAt(pos[0], pos[1], pos[2]);
+          controlsRef.current.update();
+          requestAnimationFrame(animateCamera);
+        }
+      };
+      animateCamera();
     }
   };
 
-  const checkGuess = () => {
-    if (!balloonStation || !guessCountry.trim()) return;
+  const checkGuess = async () => {
+    console.log("checkGuess called with:", guessCountry);
+    console.log("balloonStation:", balloonStation);
+    if (!balloonStation || !guessCountry.trim()) {
+      console.log("Missing balloonStation or guessCountry");
+      return;
+    }
 
-    const isCorrect =
+    const isCorrect = Boolean(
       guessCountry
         .toLowerCase()
         .includes(balloonStation.country.toLowerCase()) ||
-      balloonStation.country.toLowerCase().includes(guessCountry.toLowerCase());
+        balloonStation.country
+          .toLowerCase()
+          .includes(guessCountry.toLowerCase())
+    );
 
-    if (isCorrect) {
-      setPoints((prev) => prev + 10); // Award 10 points for correct guess
-      setIsGuessing(false);
-      setIsBalloonRiding(false);
-      // Stop the audio
-      if (audioRef) {
-        audioRef.pause();
-        audioRef.currentTime = 0;
-      }
-      // Reset camera to earth
-      if (controlsRef.current) {
-        controlsRef.current.reset();
-      }
+    console.log(
+      "Guess check:",
+      guessCountry,
+      "vs",
+      balloonStation.country,
+      "Result:",
+      isCorrect,
+      "Type:",
+      typeof isCorrect
+    );
+
+    const guessData = {
+      stationName: balloonStation.name,
+      stationCountry: balloonStation.country,
+      guessedCountry: guessCountry,
+      isCorrect,
+      timestamp: new Date(),
+    };
+
+    // Save to local storage
+    LocalStorageManager.addGuess(userId, guessData);
+    console.log("Give up saved to local storage");
+
+    if (isCorrect === true) {
+      console.log("Correct guess detected!");
+      const newPoints = points + 10;
+      console.log("Awarding points:", points, "->", newPoints);
+      setPoints(newPoints); // Award 10 points for correct guess
+
+      // Immediately save points
+      LocalStorageManager.saveUserData(userId, { points: newPoints });
+      LocalStorageManager.updateLeaderboard(userId, newPoints);
+      console.log("Points saved to local storage:", newPoints);
+
+      setGuessFeedback({
+        message: "Correct! +10 points awarded!",
+        type: "correct",
+      });
+      // End the ride after a short delay to show the success message
+      setTimeout(() => {
+        console.log("Ending balloon ride after correct guess");
+        endBalloonRide();
+      }, 2000);
     } else {
-      // Wrong guess - could add feedback here
+      // Wrong guess - show feedback
+      setGuessFeedback({
+        message: `Wrong guess! Try again or give up.`,
+        type: "wrong",
+      });
     }
   };
 
-  const giveUp = () => {
+  const giveUp = async () => {
     if (!balloonStation) return;
-    // Show the answer briefly
-    alert(`The country was: ${balloonStation.country}`);
+
+    const guessData = {
+      stationName: balloonStation.name,
+      stationCountry: balloonStation.country,
+      guessedCountry: "", // No guess
+      isCorrect: false,
+      timestamp: new Date(),
+    };
+
+    // Save to local storage
+    LocalStorageManager.addGuess(userId, guessData);
+    console.log("Guess saved to local storage");
+
+    // Show the answer and end the ride
+    setGuessFeedback({
+      message: `The country was: ${balloonStation.country}`,
+      type: "wrong",
+    });
+
+    // End balloon ride after showing the answer
+    setTimeout(() => {
+      endBalloonRide();
+    }, 3000);
+  };
+
+  const endBalloonRide = () => {
     setIsGuessing(false);
     setIsBalloonRiding(false);
+    setBalloonStation(null);
+    setGuessCountry("");
+    setGuessFeedback({ message: "", type: null });
+    setZoomProgress(0); // Reset zoom progress
+
     // Stop the audio
     if (audioRef) {
       audioRef.pause();
       audioRef.currentTime = 0;
     }
-    // Reset camera to earth
-    if (controlsRef.current) {
-      controlsRef.current.reset();
+
+    // Reset camera to earth with smooth animation
+    if (controlsRef.current && cameraRef.current) {
+      controlsRef.current.enabled = true; // Re-enable controls
+
+      // Start zoom-out animation
+      setIsZoomingOut(true);
+      setZoomProgress(0);
+
+      // Reset controls after animation completes
+      setTimeout(() => {
+        controlsRef.current.reset();
+        controlsRef.current.update();
+      }, 2000); // Match animation duration
     }
   };
 
@@ -508,6 +657,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
 
   return (
     <div style={{ width: "100vw", height: "100vh", backgroundColor: "black" }}>
+      <Header />
       <Canvas
         camera={{ position: [0, 0, 12], fov: 50 }}
         onCreated={({ camera }) => {
@@ -639,7 +789,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       <div
         style={{
           position: "absolute",
-          top: 20,
+          top: 100,
           left: 20,
           color: "white",
           background: "rgba(0,0,0,0.8)",
@@ -662,7 +812,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       <div
         style={{
           position: "absolute",
-          top: 20,
+          top: 100,
           right: 20,
           color: "white",
           background: "rgba(0,0,0,0.8)",
@@ -684,7 +834,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       <div
         style={{
           position: "absolute",
-          top: 20,
+          top: 100,
           left: 180,
           background: "rgba(0,0,0,0.8)",
           padding: "12px 16px",
@@ -739,7 +889,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         }}
         style={{
           position: "absolute",
-          top: 140,
+          top: 220,
           right: 20,
           color: "white",
           background: "rgba(0,0,0,0.8)",
@@ -773,7 +923,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         onClick={() => setShowFilters(!showFilters)}
         style={{
           position: "absolute",
-          top: 240,
+          top: 320,
           right: 20,
           color: "white",
           background: showFilters
@@ -889,7 +1039,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         }}
         style={{
           position: "absolute",
-          top: 190,
+          top: 270,
           right: 20,
           color: "white",
           background: "rgba(0,0,0,0.8)",
@@ -1031,7 +1181,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         <div
           style={{
             position: "absolute",
-            top: 290,
+            top: 370,
             right: 20,
             background: "rgba(0,0,0,0.9)",
             color: "white",
@@ -1177,7 +1327,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       <div
         style={{
           position: "absolute",
-          top: 80,
+          top: 160,
           right: 20,
           display: "flex",
           flexDirection: "row",
@@ -1188,16 +1338,18 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         {/* Balloon Ride Button */}
         <button
           onClick={startBalloonRide}
-          title="Balloon Ride"
+          disabled={radios.length === 0}
+          title={radios.length === 0 ? "Loading stations..." : "Balloon Ride"}
           style={{
             color: "white",
-            background: "rgba(0,0,0,0.8)",
+            background:
+              radios.length === 0 ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.8)",
             padding: "12px",
             borderRadius: "8px",
             border: "1px solid rgba(255,255,255,0.1)",
             fontSize: "16px",
             backdropFilter: "blur(10px)",
-            cursor: "pointer",
+            cursor: radios.length === 0 ? "not-allowed" : "pointer",
             transition: "all 0.2s ease",
             display: "flex",
             alignItems: "center",
@@ -1298,6 +1450,63 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           <FaHome
             style={{ color: showRecentlyPlayed ? "#ff6b6b" : "#1DB954" }}
           />
+        </button>
+
+        {/* Leaderboard Button */}
+        <button
+          onClick={() => setShowLeaderboard(!showLeaderboard)}
+          title={showLeaderboard ? "Close Leaderboard" : "Leaderboard"}
+          style={{
+            color: "white",
+            background: "rgba(0,0,0,0.8)",
+            padding: "12px",
+            borderRadius: "8px",
+            border: "1px solid rgba(255,255,255,0.1)",
+            fontSize: "16px",
+            backdropFilter: "blur(10px)",
+            cursor: "pointer",
+            transition: "all 0.2s ease",
+            boxShadow: showLeaderboard
+              ? "0 0 20px rgba(30, 185, 84, 0.3)"
+              : "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "48px",
+            height: "48px",
+            position: "relative",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(0,0,0,0.9)";
+            e.currentTarget.style.transform = "scale(1.05)";
+            // Show tooltip
+            const tooltip = document.createElement("div");
+            tooltip.textContent = showLeaderboard
+              ? "Close Leaderboard"
+              : "Leaderboard";
+            tooltip.style.position = "absolute";
+            tooltip.style.right = "60px";
+            tooltip.style.top = "50%";
+            tooltip.style.transform = "translateY(-50%)";
+            tooltip.style.background = "rgba(0,0,0,0.9)";
+            tooltip.style.color = "white";
+            tooltip.style.padding = "8px 12px";
+            tooltip.style.borderRadius = "6px";
+            tooltip.style.fontSize = "14px";
+            tooltip.style.whiteSpace = "nowrap";
+            tooltip.style.zIndex = "1000";
+            tooltip.style.pointerEvents = "none";
+            e.currentTarget.appendChild(tooltip);
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "rgba(0,0,0,0.8)";
+            e.currentTarget.style.transform = "scale(1)";
+            // Remove tooltip
+            const tooltip = e.currentTarget.querySelector("div");
+            if (tooltip) tooltip.remove();
+          }}
+        >
+          🏆
         </button>
 
         {/* Like Menu Button */}
@@ -1674,7 +1883,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         <div
           style={{
             position: "absolute",
-            top: 20,
+            top: 100,
             right: 20,
             background: "rgba(0,0,0,0.9)",
             color: "white",
@@ -1730,7 +1939,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         <div
           style={{
             position: "absolute",
-            top: 100,
+            top: 180,
             left: "50%",
             transform: "translateX(-50%)",
             background: "rgba(0,0,0,0.9)",
@@ -1777,6 +1986,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
             textAlign: "center",
             animation: "fadeIn 0.4s ease-out",
           }}
+          onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside
         >
           <div
             style={{
@@ -1794,6 +2004,25 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           <div style={{ fontSize: "16px", marginBottom: "16px", opacity: 0.8 }}>
             Now playing: {balloonStation.name}
           </div>
+
+          {/* Feedback Message */}
+          {guessFeedback.message && (
+            <div
+              style={{
+                padding: "12px",
+                borderRadius: "8px",
+                marginBottom: "16px",
+                backgroundColor:
+                  guessFeedback.type === "correct" ? "#1DB954" : "#dc2626",
+                color: "white",
+                fontWeight: "600",
+                textAlign: "center",
+              }}
+            >
+              {guessFeedback.message}
+            </div>
+          )}
+
           <div
             style={{
               display: "flex",
@@ -1806,7 +2035,13 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
               type="text"
               placeholder="Enter country name..."
               value={guessCountry}
-              onChange={(e) => setGuessCountry(e.target.value)}
+              onChange={(e) => {
+                setGuessCountry(e.target.value);
+                // Clear previous feedback when user starts typing
+                if (guessFeedback.message) {
+                  setGuessFeedback({ message: "", type: null });
+                }
+              }}
               style={{
                 padding: "12px",
                 borderRadius: "8px",
@@ -1817,6 +2052,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                 textAlign: "center",
               }}
               onKeyPress={(e) => e.key === "Enter" && checkGuess()}
+              disabled={guessFeedback.type === "correct"} // Disable input after correct guess
             />
           </div>
           <div
@@ -1824,45 +2060,67 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           >
             <button
               onClick={checkGuess}
+              disabled={
+                !guessCountry.trim() || guessFeedback.type === "correct"
+              }
               style={{
                 padding: "12px 20px",
                 borderRadius: "8px",
                 border: "none",
-                background: "#1DB954",
+                background:
+                  !guessCountry.trim() || guessFeedback.type === "correct"
+                    ? "rgba(29, 185, 84, 0.5)"
+                    : "#1DB954",
                 color: "white",
                 fontSize: "16px",
                 fontWeight: "600",
-                cursor: "pointer",
+                cursor:
+                  !guessCountry.trim() || guessFeedback.type === "correct"
+                    ? "not-allowed"
+                    : "pointer",
                 transition: "all 0.2s ease",
               }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "#17a34a")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "#1DB954")
-              }
+              onMouseEnter={(e) => {
+                if (guessCountry.trim() && guessFeedback.type !== "correct") {
+                  e.currentTarget.style.background = "#17a34a";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (guessCountry.trim() && guessFeedback.type !== "correct") {
+                  e.currentTarget.style.background = "#1DB954";
+                }
+              }}
             >
               Guess (+10 points)
             </button>
             <button
               onClick={giveUp}
+              disabled={guessFeedback.type === "correct"}
               style={{
                 padding: "12px 20px",
                 borderRadius: "8px",
                 border: "1px solid rgba(255,255,255,0.3)",
-                background: "rgba(255,255,255,0.1)",
+                background:
+                  guessFeedback.type === "correct"
+                    ? "rgba(255,255,255,0.1)"
+                    : "rgba(255,255,255,0.1)",
                 color: "white",
                 fontSize: "16px",
                 fontWeight: "600",
-                cursor: "pointer",
+                cursor:
+                  guessFeedback.type === "correct" ? "not-allowed" : "pointer",
                 transition: "all 0.2s ease",
               }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "rgba(255,255,255,0.2)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "rgba(255,255,255,0.1)")
-              }
+              onMouseEnter={(e) => {
+                if (guessFeedback.type !== "correct") {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.2)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (guessFeedback.type !== "correct") {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+                }
+              }}
             >
               Give Up
             </button>
@@ -2054,6 +2312,50 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
             onClose={() => setShowLikeMenu(false)}
             initialAnimation={menuAnimation}
           />
+        </>
+      )}
+
+      {/* Leaderboard Overlay */}
+      {showLeaderboard && (
+        <>
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 z-40"
+            onClick={() => setShowLeaderboard(false)}
+          />
+          <div className="fixed inset-0 flex items-center justify-center p-4 z-50">
+            <div className="relative bg-gray-900 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between p-6 border-b border-gray-800">
+                <h1 className="text-2xl font-bold text-white">
+                  🏆 Leaderboard
+                </h1>
+                <button
+                  onClick={() => setShowLeaderboard(false)}
+                  className="text-gray-400 hover:text-white transition-colors p-2 rounded-full hover:bg-gray-800"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Leaderboard Content */}
+              <div className="flex-1 overflow-y-auto">
+                <Leaderboard />
+              </div>
+            </div>
+          </div>
         </>
       )}
     </div>
