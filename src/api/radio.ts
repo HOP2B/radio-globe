@@ -1,6 +1,18 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-// Approximate country centers for stations without coordinates
+export interface RadioStation {
+  stationuuid: string;
+  name: string;
+  url: string;
+  favicon: string;
+  country: string;
+  city: string;
+  latitude: number;
+  longitude: number;
+  language?: string;
+  bitrate?: number;
+  codec?: string;
+  votes?: number;
+}
 const countryCenters: Record<string, [number, number]> = {
   US: [39.8283, -98.5795], // USA center
   GB: [54.7024, -3.2766], // UK center
@@ -142,15 +154,14 @@ export interface RadioStation {
   votes?: number;
 }
 
+// ------------------ Fetch Radios ------------------
 export const fetchRadios = async (): Promise<RadioStation[]> => {
   console.log("Starting radio fetch...");
 
-  // Create AbortController for timeout
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000); // Increased to 15 seconds
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
-    // Try multiple API endpoints for better reliability
     const endpoints = [
       "https://de1.api.radio-browser.info/json/stations?limit=1000",
       "https://all.api.radio-browser.info/json/stations?limit=1000",
@@ -164,26 +175,19 @@ export const fetchRadios = async (): Promise<RadioStation[]> => {
         console.log(`Trying endpoint: ${endpoint}`);
         const res = await fetch(endpoint, {
           signal: controller.signal,
-          headers: {
-            "User-Agent": "RadioGlobe/1.0",
-          },
+          headers: { "User-Agent": "RadioGlobe/1.0" },
         });
 
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
 
         const radios = await res.json();
-        console.log(`Received ${radios.length} stations from API`);
-
-        if (!Array.isArray(radios) || radios.length === 0) {
+        if (!Array.isArray(radios) || radios.length === 0)
           throw new Error("API returned empty or invalid data");
-        }
 
-        // Process stations, assigning coordinates or country center if missing/invalid
-        const processedRadios = radios
+        // Process stations
+        const processed: RadioStation[] = radios
           .filter((r: any) => r.name && r.url)
-          .slice(0, 300) // Reduced limit for better performance
+          .slice(0, 300)
           .map((r: any) => {
             let lat = parseFloat(r.geo_lat);
             let lng = parseFloat(r.geo_long);
@@ -196,20 +200,17 @@ export const fetchRadios = async (): Promise<RadioStation[]> => {
               lng <= 180;
 
             if (!hasValidCoords) {
-              // Use country center if available, otherwise random
-              const countryCenter = countryCenters[r.countrycode];
-              if (countryCenter) {
-                [lat, lng] = countryCenter;
-              } else {
-                lat = (Math.random() - 0.5) * 180;
-                lng = (Math.random() - 0.5) * 360;
-              }
+              const center = countryCenters[r.countrycode];
+              [lat, lng] = center || [
+                (Math.random() - 0.5) * 180,
+                (Math.random() - 0.5) * 360,
+              ];
             }
 
             return {
               stationuuid: r.stationuuid || `${r.name}-${Math.random()}`,
               name: r.name,
-              url: r.url,
+              url: r.url_resolved || r.url,
               favicon: r.favicon || "",
               country: r.country || "Unknown",
               city: r.state || r.country || "Unknown",
@@ -222,28 +223,70 @@ export const fetchRadios = async (): Promise<RadioStation[]> => {
             };
           });
 
-        console.log("Processed radios:", processedRadios.length);
         clearTimeout(timeoutId);
-        return processedRadios;
+        console.log("Processed radios:", processed.length);
+
+        // Make Mexican radios very rare by limiting to only 5
+        const mexicanRadios = processed.filter((r) => r.country === "Mexico");
+        const otherRadios = processed.filter((r) => r.country !== "Mexico");
+        const selectedMexican = mexicanRadios
+          .sort(() => Math.random() - 0.5)
+          .slice(0, 5);
+        const filteredRadios = [...otherRadios, ...selectedMexican];
+
+        console.log(
+          "Filtered radios:",
+          filteredRadios.length,
+          "Mexican radios kept:",
+          selectedMexican.length
+        );
+        return filteredRadios;
       } catch (err) {
         console.warn(`Endpoint ${endpoint} failed:`, err);
         lastError = err instanceof Error ? err : new Error(String(err));
-        continue; // Try next endpoint
+        continue;
       }
     }
 
-    // If all endpoints failed, throw the last error
     throw lastError || new Error("All API endpoints failed");
   } catch (error) {
     clearTimeout(timeoutId);
-    console.error("Radio fetch error:", error);
-
-    if (error instanceof Error) {
-      if (error.name === "AbortError") {
-        throw new Error("Request timed out - API may be slow or unreachable");
-      }
-      throw error;
-    }
-    throw new Error("Failed to fetch radio stations");
+    throw new Error(
+      error instanceof Error ? error.message : "Failed to fetch radios"
+    );
   }
+};
+
+// ------------------ Process for Map ------------------
+export const processRadiosForMap = (
+  stations: RadioStation[]
+): RadioStation[] => {
+  const mexicoStations = stations.filter((s) => s.country === "Mexico");
+  const otherStations = stations.filter((s) => s.country !== "Mexico");
+
+  const maxMexico = Math.max(1, Math.floor(otherStations.length * 0.1));
+  const limitedMexico = mexicoStations.slice(0, maxMexico);
+
+  const combined = [...otherStations, ...limitedMexico];
+  return combined.sort(() => Math.random() - 0.5);
+};
+
+// ------------------ Pick Balloon Station ------------------
+export const pickBalloonStation = (stations: RadioStation[]): RadioStation => {
+  const mexicoStations = stations.filter((s) => s.country === "Mexico");
+  const otherStations = stations.filter((s) => s.country !== "Mexico");
+
+  const maxMexico = Math.max(1, Math.floor(otherStations.length * 0.1));
+  const limitedMexico = mexicoStations.slice(0, maxMexico);
+
+  const combined = [...otherStations, ...limitedMexico];
+  const shuffled = combined.sort(() => Math.random() - 0.5);
+
+  const weighted = shuffled.flatMap((station) => {
+    const weight = station.country === "Mexico" ? 1 : 5;
+    return Array(weight).fill(station);
+  });
+
+  const index = Math.floor(Math.random() * weighted.length);
+  return weighted[index];
 };
