@@ -4,7 +4,7 @@ export interface Achievement {
   description: string;
   icon: string;
   condition: (stats: UserStats) => boolean;
-  rarity: "common" | "rare" | "epic" | "legendary";
+  rarity: "common" | "rare" | "epic" | "legendary" | "???";
 }
 
 export interface UserStats {
@@ -14,6 +14,7 @@ export interface UserStats {
   streakRecord: number;
   favoriteCountry: string;
   joinDate: string;
+  discoveredEasterEggs: string[];
 }
 
 export interface UserAchievement {
@@ -148,6 +149,14 @@ export const ACHIEVEMENTS: Achievement[] = [
     condition: (stats) => stats.correctGuesses >= 500,
     rarity: "legendary",
   },
+  {
+    id: "???",
+    name: "???",
+    description: "???",
+    icon: "???",
+    condition: (stats) => stats.totalGuesses >= 1,
+    rarity: "???",
+  },
 ];
 
 // Helper functions
@@ -167,6 +176,8 @@ export function getAchievementRarityColor(
       return "#8b5cf6";
     case "legendary":
       return "#f59e0b";
+    case "???":
+      return "#ff0000ff";
     default:
       return "#6b7280";
   }

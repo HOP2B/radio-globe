@@ -993,6 +993,11 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                     alert(`${station.name} is currently unavailable`);
                     return;
                   }
+                  // Check if station has a valid URL
+                  if (!station.url || !station.url.trim()) {
+                    alert(`${station.name} is currently unavailable`);
+                    return;
+                  }
                   // Stop previous audio if playing
                   if (audioRef && !audioRef.paused) {
                     audioRef.pause();
@@ -1004,36 +1009,56 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                   if (audioRef) {
                     audioRef.src = station.url;
                     audioRef.volume = volume;
-                    try {
-                      await audioRef.play();
-                      console.log("Auto-play successful for:", station.name);
-                      // Mark as available (remove from unavailable set)
-                      setUnavailableStations((prev) => {
-                        const newSet = new Set(prev);
-                        newSet.delete(station.stationuuid);
-                        return newSet;
+                    const playPromise = audioRef.play();
+                    const timeoutId = setTimeout(() => {
+                      // Timeout occurred
+                      console.log("Audio play timeout for:", station.name);
+                      setIsPlaying(false);
+                      setIsLoading(false);
+                      setUnavailableStations(
+                        (prev) => new Set([...prev, station.stationuuid])
+                      );
+                      setBalloonNotification({
+                        message:
+                          "Error: Radio stream failed to load. The station may be unavailable.",
+                        type: "info",
                       });
-                      // Add to recently played
-                      setRecentlyPlayed((prev) => {
-                        const filtered = prev.filter(
-                          (s) => s.stationuuid !== station.stationuuid
-                        );
-                        return [station, ...filtered].slice(0, 20); // Keep last 20
+                      setTimeout(() => setBalloonNotification(null), 5000);
+                    }, 5000);
+
+                    playPromise
+                      .then(() => {
+                        clearTimeout(timeoutId);
+                        console.log("Auto-play successful for:", station.name);
+                        // Mark as available (remove from unavailable set)
+                        setUnavailableStations((prev) => {
+                          const newSet = new Set(prev);
+                          newSet.delete(station.stationuuid);
+                          return newSet;
+                        });
+                        // Add to recently played
+                        setRecentlyPlayed((prev) => {
+                          const filtered = prev.filter(
+                            (s) => s.stationuuid !== station.stationuuid
+                          );
+                          return [station, ...filtered].slice(0, 20); // Keep last 20
+                        });
+                      })
+                      .catch((e) => {
+                        clearTimeout(timeoutId);
+                        console.log("Auto-play failed:", e);
+                        // Keep in unavailable set (already there)
+                        // Try again after a short delay
+                        setTimeout(() => {
+                          if (audioRef && audioRef.src === station.url) {
+                            audioRef
+                              .play()
+                              .catch((e2) =>
+                                console.log("Retry auto-play failed:", e2)
+                              );
+                          }
+                        }, 100);
                       });
-                    } catch (e) {
-                      console.log("Auto-play failed:", e);
-                      // Keep in unavailable set (already there)
-                      // Try again after a short delay
-                      setTimeout(() => {
-                        if (audioRef && audioRef.src === station.url) {
-                          audioRef
-                            .play()
-                            .catch((e2) =>
-                              console.log("Retry auto-play failed:", e2)
-                            );
-                        }
-                      }, 100);
-                    }
                   }
                 }}
                 onPointerOver={() => setHoveredStation(station)}
@@ -1591,6 +1616,10 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         onCanPlay={() => setIsLoading(false)}
         onError={(e) => {
           console.error("Audio error:", e);
+          // Ignore AbortError (code 20) which happens when src changes during loading
+          if (audioRef?.error?.code === 20) {
+            return;
+          }
           setIsPlaying(false);
           setIsLoading(false);
           if (currentStation) {
@@ -1598,6 +1627,13 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
               (prev) => new Set([...prev, currentStation.stationuuid])
             );
           }
+          // Show user-friendly error notification
+          setBalloonNotification({
+            message:
+              "Failed to load audio stream. The station may be unavailable or experiencing issues.",
+            type: "info",
+          });
+          setTimeout(() => setBalloonNotification(null), 5000);
         }}
         style={{ display: "none" }}
       />

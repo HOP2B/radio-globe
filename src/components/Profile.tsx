@@ -144,6 +144,7 @@ export default function Profile() {
           position: "absolute",
           top: "20px",
           left: "20px",
+          zIndex: 10,
           background:
             theme === "light" ? "rgba(255,255,255,0.8)" : "rgba(0,0,0,0.8)",
           border:
@@ -173,7 +174,7 @@ export default function Profile() {
           e.currentTarget.style.transform = "translateY(0)";
         }}
       >
-        ← Back
+        ← Back to Home
       </button>
       {/* Header */}
       <div
