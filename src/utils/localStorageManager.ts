@@ -35,6 +35,8 @@ interface UserData {
   guesses: Guess[];
   followers?: string[]; // Array of user IDs
   following?: string[]; // Array of user IDs
+  discoveredEasterEggs?: string[];
+  totalGuesses?: number;
 }
 
 interface LeaderboardEntry {
@@ -70,6 +72,10 @@ export const LocalStorageManager = {
         guesses: Array.isArray(data.guesses) ? data.guesses : [],
         followers: Array.isArray(data.followers) ? data.followers : [],
         following: Array.isArray(data.following) ? data.following : [],
+        discoveredEasterEggs: Array.isArray(data.discoveredEasterEggs)
+          ? data.discoveredEasterEggs
+          : [],
+        totalGuesses: data.totalGuesses ?? 0,
       };
     } catch (error) {
       console.error("Error getting user data:", error);
@@ -117,6 +123,8 @@ export const LocalStorageManager = {
       guesses: [],
       followers: [],
       following: [],
+      discoveredEasterEggs: [],
+      totalGuesses: 0,
     };
 
     await this.saveUserData(userId, newUser);

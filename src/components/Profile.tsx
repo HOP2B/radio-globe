@@ -87,6 +87,7 @@ export default function Profile() {
             streakRecord: maxStreak,
             favoriteCountry,
             joinDate: new Date().toISOString().split("T")[0],
+            discoveredEasterEggs: userData.discoveredEasterEggs || [],
           };
 
           setStats(achievementStats);
