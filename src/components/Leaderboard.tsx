@@ -13,14 +13,13 @@ export default function Leaderboard() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const loadLeaderboard = async () => {
-    setLoading(true);
-    const data = await LocalStorageManager.getLeaderboard();
-    setLeaderboard(data);
-    setLoading(false);
-  };
-
   useEffect(() => {
+    const loadLeaderboard = async () => {
+      setLoading(true);
+      const data = await LocalStorageManager.getLeaderboard();
+      setLeaderboard(data);
+      setLoading(false);
+    };
     loadLeaderboard();
   }, []);
 

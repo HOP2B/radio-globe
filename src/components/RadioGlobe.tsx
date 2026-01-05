@@ -1,10 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Canvas, useLoader, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Sphere, Stars } from "@react-three/drei";
 import { TextureLoader, Vector3 } from "three";
 import { useUser } from "@clerk/clerk-react";
+import { useTheme } from "../hooks/useTheme";
+import { rtdb } from "../firebase";
+import { ref, onValue, off, set, update } from "firebase/database";
 import type { RadioStation } from "../api/radio";
 import LikeMenu from "./LikeMenu";
 import Leaderboard from "./Leaderboard";
@@ -116,6 +119,7 @@ function RadioDot({
 
 export default function RadioGlobe({ radios }: RadioGlobeProps) {
   const { user } = useUser();
+  const { theme, toggleTheme } = useTheme();
   // Use Clerk user ID if available, otherwise fallback to local-user
   const userId = user?.id || "local-user";
   const [currentStation, setCurrentStation] = useState<RadioStation | null>(
@@ -172,6 +176,13 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   const [hoveredStation, setHoveredStation] = useState<RadioStation | null>(
     null
   );
+  // Multiplayer states
+  const [isMultiplayerMode, setIsMultiplayerMode] = useState(false);
+  const [multiplayerSessionId, setMultiplayerSessionId] = useState<
+    string | null
+  >(null);
+  const [multiplayerPlayers, setMultiplayerPlayers] = useState<any[]>([]);
+  const [currentPlayerScore, setCurrentPlayerScore] = useState(0);
   const [filterType, setFilterType] = useState<"all" | "country" | "language">(
     "all"
   );
@@ -188,7 +199,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   const radius = 5;
 
   // Sound effects
-  const playSound = (frequency: number, duration: number = 200) => {
+  const playSound = useCallback((frequency: number, duration: number = 200) => {
     try {
       const audioContext = new (window.AudioContext ||
         (window as any).webkitAudioContext)();
@@ -213,7 +224,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       // Fallback: no sound on error
       console.log("Sound effect:", frequency === 800 ? "Correct!" : "Wrong!");
     }
-  };
+  }, []);
 
   // Handle audio setup when station changes
   useEffect(() => {
@@ -294,6 +305,84 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     savePoints();
   }, [points, userId, user]);
 
+  const handleTimeout = useCallback(async () => {
+    if (!balloonStation) return;
+
+    // Play timeout sound
+    playSound(200, 500); // Low, long beep for timeout
+
+    const guessData = {
+      stationName: balloonStation.name,
+      stationCountry: balloonStation.country,
+      guessedCountry: "", // Timeout
+      isCorrect: false,
+      timestamp: new Date(),
+    };
+
+    // Save to local storage
+    await LocalStorageManager.addGuess(userId, guessData);
+
+    // Reset streak on timeout
+    setGuessStreak(0);
+
+    // Show timeout message
+    setGuessFeedback({
+      message: `⏰ Time's up! The country was: ${balloonStation.country}`,
+      type: "wrong",
+    });
+
+    // End balloon ride after showing the answer
+    setTimeout(() => {
+      setIsGuessing(false);
+      setIsBalloonRiding(false);
+      setBalloonStation(null);
+      setGuessCountry("");
+      setGuessFeedback({ message: "", type: null });
+      setZoomProgress(0);
+
+      // Clean up multiplayer session
+      if (isMultiplayerMode && multiplayerSessionId) {
+        const playersRef = ref(
+          rtdb,
+          `balloon-sessions/${multiplayerSessionId}/players`
+        );
+        off(playersRef);
+        setIsMultiplayerMode(false);
+        setMultiplayerSessionId(null);
+        setMultiplayerPlayers([]);
+        setCurrentPlayerScore(0);
+      }
+
+      // Stop the audio
+      if (audioRef) {
+        audioRef.pause();
+        audioRef.currentTime = 0;
+      }
+
+      // Reset camera to earth with smooth animation
+      if (controlsRef.current && cameraRef.current) {
+        controlsRef.current.enabled = true; // Re-enable controls
+
+        // Start zoom-out animation
+        setIsZoomingOut(true);
+        setZoomProgress(0);
+
+        // Reset controls after animation completes
+        setTimeout(() => {
+          controlsRef.current.reset();
+          controlsRef.current.update();
+        }, 2000); // Match animation duration
+      }
+    }, 3000);
+  }, [
+    balloonStation,
+    userId,
+    playSound,
+    isMultiplayerMode,
+    multiplayerSessionId,
+    audioRef,
+  ]);
+
   // Countdown timer for guessing
   useEffect(() => {
     let interval: number;
@@ -310,7 +399,7 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isGuessing, guessTimeLeft]);
+  }, [isGuessing, guessTimeLeft, handleTimeout]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -503,6 +592,79 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   // Load Earth texture
   const earthTexture = useLoader(TextureLoader, "/earth-map-texture.jpg");
 
+  // Multiplayer functions
+  const startMultiplayerBalloonRide = async () => {
+    if (radios.length === 0) {
+      console.warn("No radio stations loaded yet");
+      return;
+    }
+
+    // Use a global session for simplicity
+    const sessionId = "global-multiplayer";
+    setMultiplayerSessionId(sessionId);
+    setIsMultiplayerMode(true);
+
+    // Select a random station
+    const selectedStation = radios[Math.floor(Math.random() * radios.length)];
+    setBalloonStation(selectedStation);
+    setGuessCountry("");
+    setIsGuessing(true);
+    setIsBalloonRiding(true);
+    setZoomProgress(0);
+    setGuessTimeLeft(30);
+    setCurrentPlayerScore(0);
+
+    // Join the multiplayer session
+    const playerRef = ref(
+      rtdb,
+      `balloon-sessions/${sessionId}/players/${userId}`
+    );
+    await set(playerRef, {
+      id: userId,
+      name: user?.fullName || user?.username || "Anonymous",
+      score: 0,
+      isActive: true,
+      joinedAt: Date.now(),
+    });
+
+    // Listen to other players
+    const playersRef = ref(rtdb, `balloon-sessions/${sessionId}/players`);
+    onValue(playersRef, (snapshot) => {
+      const playersData = snapshot.val();
+      if (playersData) {
+        const players = Object.values(playersData);
+        setMultiplayerPlayers(players);
+      }
+    });
+
+    // Set current station and play
+    setCurrentStation(selectedStation);
+    setIsPlaying(true);
+    if (audioRef) {
+      audioRef.src = selectedStation.url;
+      audioRef.volume = volume;
+      audioRef.play().catch((e) => console.log("Auto-play failed:", e));
+    }
+
+    setBalloonNotification({
+      message:
+        "🎈 Multiplayer Balloon Ride started! Compete with other players!",
+      type: "info",
+    });
+    setTimeout(() => setBalloonNotification(null), 5000);
+  };
+
+  const updatePlayerScore = async (newScore: number) => {
+    if (!multiplayerSessionId) return;
+
+    setCurrentPlayerScore(newScore);
+    const playerRef = ref(
+      rtdb,
+      `balloon-sessions/${multiplayerSessionId}/players/${userId}`
+    );
+    await update(playerRef, { score: newScore });
+  };
+
   // Balloon Ride functions
   const startBalloonRide = () => {
     if (radios.length === 0) {
@@ -510,50 +672,8 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       return;
     }
 
-    // Weighted selection: 85% Mexico, 15% other countries for more Mexican focus
-    let selectedStation: RadioStation;
-
-    if (Math.random() < 0.85) {
-      // 85% chance: Select from Mexican stations
-      const mexicanStations = radios.filter(
-        (station) =>
-          station.country?.toLowerCase().includes("mexico") ||
-          station.country?.toLowerCase() === "mexico"
-      );
-
-      if (mexicanStations.length > 0) {
-        // Pick a random Mexican station
-        selectedStation =
-          mexicanStations[Math.floor(Math.random() * mexicanStations.length)];
-      } else {
-        // Fallback to random if no Mexican stations
-        selectedStation = radios[Math.floor(Math.random() * radios.length)];
-      }
-    } else {
-      // 15% chance: Select from non-Mexican stations for variety
-      const nonMexicanStations = radios.filter(
-        (station) =>
-          !station.country?.toLowerCase().includes("mexico") &&
-          station.country?.toLowerCase() !== "mexico" &&
-          station.country // Make sure country exists
-      );
-
-      if (nonMexicanStations.length > 0) {
-        // Spread selection across different countries
-        selectedStation =
-          nonMexicanStations[
-            Math.floor(Math.random() * nonMexicanStations.length)
-          ];
-      } else {
-        // Fallback to random if all stations are Mexican
-        selectedStation = radios[Math.floor(Math.random() * radios.length)];
-      }
-    }
-
-    if (!selectedStation) {
-      console.error("Failed to select random station");
-      return;
-    }
+    // Select a random station from all countries
+    const selectedStation = radios[Math.floor(Math.random() * radios.length)];
 
     setBalloonStation(selectedStation);
     setGuessCountry("");
@@ -673,6 +793,11 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
       setPoints(newPoints);
       setGuessStreak(newStreak);
 
+      // Update multiplayer score if in multiplayer mode
+      if (isMultiplayerMode) {
+        updatePlayerScore(currentPlayerScore + totalPoints);
+      }
+
       // Play success sound
       playSound(800, 300); // Higher pitch for success
 
@@ -738,38 +863,6 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     }, 3000);
   };
 
-  const handleTimeout = async () => {
-    if (!balloonStation) return;
-
-    // Play timeout sound
-    playSound(200, 500); // Low, long beep for timeout
-
-    const guessData = {
-      stationName: balloonStation.name,
-      stationCountry: balloonStation.country,
-      guessedCountry: "", // Timeout
-      isCorrect: false,
-      timestamp: new Date(),
-    };
-
-    // Save to local storage
-    await LocalStorageManager.addGuess(userId, guessData);
-
-    // Reset streak on timeout
-    setGuessStreak(0);
-
-    // Show timeout message
-    setGuessFeedback({
-      message: `⏰ Time's up! The country was: ${balloonStation.country}`,
-      type: "wrong",
-    });
-
-    // End balloon ride after showing the answer
-    setTimeout(() => {
-      endBalloonRide();
-    }, 3000);
-  };
-
   const endBalloonRide = () => {
     setIsGuessing(false);
     setIsBalloonRiding(false);
@@ -777,6 +870,19 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
     setGuessCountry("");
     setGuessFeedback({ message: "", type: null });
     setZoomProgress(0); // Reset zoom progress
+
+    // Clean up multiplayer session
+    if (isMultiplayerMode && multiplayerSessionId) {
+      const playersRef = ref(
+        rtdb,
+        `balloon-sessions/${multiplayerSessionId}/players`
+      );
+      off(playersRef);
+      setIsMultiplayerMode(false);
+      setMultiplayerSessionId(null);
+      setMultiplayerPlayers([]);
+      setCurrentPlayerScore(0);
+    }
 
     // Stop the audio
     if (audioRef) {
@@ -807,8 +913,8 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
         style={{
           width: "100vw",
           height: "100vh",
-          backgroundColor: "black",
-          color: "white",
+          backgroundColor: theme === "light" ? "#f8fafc" : "black",
+          color: theme === "light" ? "#1f2937" : "white",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -823,7 +929,13 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
   }
 
   return (
-    <div style={{ width: "100vw", height: "100vh", backgroundColor: "black" }}>
+    <div
+      style={{
+        width: "100vw",
+        height: "100vh",
+        backgroundColor: theme === "light" ? "#f8fafc" : "black",
+      }}
+    >
       <Header />
       <Canvas
         camera={{ position: [0, 0, 12], fov: 50 }}
@@ -1549,6 +1661,53 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           <FaCloud style={{ color: "#87CEEB" }} />
         </button>
 
+        {/* Multiplayer Balloon Ride Button */}
+        <button
+          onClick={startMultiplayerBalloonRide}
+          disabled={radios.length === 0}
+          title={
+            radios.length === 0
+              ? "Loading stations..."
+              : "Multiplayer Balloon Ride - Compete with others!"
+          }
+          className={`text-white p-3 rounded-xl border-2 font-medium backdrop-blur-md cursor-pointer transition-all duration-300 flex items-center justify-center w-13 h-13 relative ${
+            radios.length === 0
+              ? "bg-black/50 cursor-not-allowed"
+              : isMultiplayerMode
+              ? "bg-purple-500/90 border-purple-400 shadow-lg shadow-purple-500/60"
+              : "bg-black/80 border-white/20 hover:bg-black/90 shadow-lg"
+          }`}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(0,0,0,0.9)";
+            e.currentTarget.style.transform = "scale(1.05)";
+            // Show tooltip
+            const tooltip = document.createElement("div");
+            tooltip.textContent = "Multiplayer Balloon Ride";
+            tooltip.style.position = "absolute";
+            tooltip.style.right = "60px";
+            tooltip.style.top = "50%";
+            tooltip.style.transform = "translateY(-50%)";
+            tooltip.style.background = "rgba(0,0,0,0.9)";
+            tooltip.style.color = "white";
+            tooltip.style.padding = "8px 12px";
+            tooltip.style.borderRadius = "6px";
+            tooltip.style.fontSize = "14px";
+            tooltip.style.whiteSpace = "nowrap";
+            tooltip.style.zIndex = "1000";
+            tooltip.style.pointerEvents = "none";
+            e.currentTarget.appendChild(tooltip);
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "rgba(0,0,0,0.8)";
+            e.currentTarget.style.transform = "scale(1)";
+            // Remove tooltip
+            const tooltip = e.currentTarget.querySelector("div");
+            if (tooltip) tooltip.remove();
+          }}
+        >
+          <span style={{ fontSize: "16px" }}>👥</span>
+        </button>
+
         {/* Recently Played Button */}
         <button
           onClick={() => setShowRecentlyPlayed(!showRecentlyPlayed)}
@@ -1722,6 +1881,60 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
           }}
         >
           <FaHeart style={{ color: showLikeMenu ? "#ff6b6b" : "#1DB954" }} />
+        </button>
+
+        {/* Theme Toggle Button */}
+        <button
+          onClick={toggleTheme}
+          title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+          style={{
+            color: "white",
+            background: "rgba(0,0,0,0.8)",
+            padding: "12px",
+            borderRadius: "8px",
+            border: "1px solid rgba(255,255,255,0.1)",
+            fontSize: "16px",
+            backdropFilter: "blur(10px)",
+            cursor: "pointer",
+            transition: "all 0.2s ease",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "48px",
+            height: "48px",
+            position: "relative",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(0,0,0,0.9)";
+            e.currentTarget.style.transform = "scale(1.05)";
+            // Show tooltip
+            const tooltip = document.createElement("div");
+            tooltip.textContent = `Switch to ${
+              theme === "light" ? "dark" : "light"
+            } mode`;
+            tooltip.style.position = "absolute";
+            tooltip.style.right = "60px";
+            tooltip.style.top = "50%";
+            tooltip.style.transform = "translateY(-50%)";
+            tooltip.style.background = "rgba(0,0,0,0.9)";
+            tooltip.style.color = "white";
+            tooltip.style.padding = "8px 12px";
+            tooltip.style.borderRadius = "6px";
+            tooltip.style.fontSize = "14px";
+            tooltip.style.whiteSpace = "nowrap";
+            tooltip.style.zIndex = "1000";
+            tooltip.style.pointerEvents = "none";
+            e.currentTarget.appendChild(tooltip);
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "rgba(0,0,0,0.8)";
+            e.currentTarget.style.transform = "scale(1)";
+            // Remove tooltip
+            const tooltip = e.currentTarget.querySelector("div");
+            if (tooltip) tooltip.remove();
+          }}
+        >
+          {theme === "light" ? "🌙" : "☀️"}
         </button>
       </div>
 
@@ -2306,6 +2519,84 @@ export default function RadioGlobe({ radios }: RadioGlobeProps) {
                 Reset Tutorial
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Multiplayer Leaderboard */}
+      {isMultiplayerMode && multiplayerPlayers.length > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            top: 160,
+            right: 400,
+            background: "rgba(0,0,0,0.9)",
+            color: "white",
+            padding: "16px 20px",
+            borderRadius: "12px",
+            border: "2px solid #8b5cf6",
+            backdropFilter: "blur(10px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+            zIndex: 55,
+            minWidth: "200px",
+            maxHeight: "300px",
+            overflowY: "auto",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "16px",
+              fontWeight: "600",
+              marginBottom: "12px",
+              color: "#8b5cf6",
+            }}
+          >
+            👥 Live Players ({multiplayerPlayers.length})
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {multiplayerPlayers
+              .sort((a: any, b: any) => b.score - a.score)
+              .map((player: any, index: number) => (
+                <div
+                  key={player.id}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "8px 12px",
+                    background:
+                      player.id === userId
+                        ? "rgba(139, 92, 246, 0.2)"
+                        : "rgba(255,255,255,0.05)",
+                    borderRadius: "6px",
+                    border: player.id === userId ? "1px solid #8b5cf6" : "none",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <span style={{ fontSize: "14px", fontWeight: "bold" }}>
+                      #{index + 1}
+                    </span>
+                    <span style={{ fontSize: "14px" }}>
+                      {player.name} {player.id === userId && "(You)"}
+                    </span>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: "14px",
+                      fontWeight: "bold",
+                      color: "#1DB954",
+                    }}
+                  >
+                    {player.score || 0}
+                  </span>
+                </div>
+              ))}
           </div>
         </div>
       )}

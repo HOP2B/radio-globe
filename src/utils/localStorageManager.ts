@@ -33,6 +33,8 @@ interface UserData {
   displayName?: string;
   username?: string;
   guesses: Guess[];
+  followers?: string[]; // Array of user IDs
+  following?: string[]; // Array of user IDs
 }
 
 interface LeaderboardEntry {
@@ -66,6 +68,8 @@ export const LocalStorageManager = {
         displayName: data.displayName,
         username: data.username,
         guesses: Array.isArray(data.guesses) ? data.guesses : [],
+        followers: Array.isArray(data.followers) ? data.followers : [],
+        following: Array.isArray(data.following) ? data.following : [],
       };
     } catch (error) {
       console.error("Error getting user data:", error);
@@ -111,6 +115,8 @@ export const LocalStorageManager = {
       id: userId,
       points: 0,
       guesses: [],
+      followers: [],
+      following: [],
     };
 
     await this.saveUserData(userId, newUser);
@@ -169,6 +175,63 @@ export const LocalStorageManager = {
       await this.saveUserData(userId, { guesses });
     } catch (error) {
       console.error("Error adding guess:", error);
+    }
+  },
+
+  /* ---------- FOLLOWING ---------- */
+
+  async followUser(followerId: string, targetUserId: string) {
+    try {
+      // Add targetUserId to follower's following list
+      const followerData = await this.getUserData(followerId);
+      if (followerData && !followerData.following?.includes(targetUserId)) {
+        const newFollowing = [...(followerData.following || []), targetUserId];
+        await this.saveUserData(followerId, { following: newFollowing });
+      }
+
+      // Add followerId to target user's followers list
+      const targetData = await this.getUserData(targetUserId);
+      if (targetData && !targetData.followers?.includes(followerId)) {
+        const newFollowers = [...(targetData.followers || []), followerId];
+        await this.saveUserData(targetUserId, { followers: newFollowers });
+      }
+    } catch (error) {
+      console.error("Error following user:", error);
+    }
+  },
+
+  async unfollowUser(followerId: string, targetUserId: string) {
+    try {
+      // Remove targetUserId from follower's following list
+      const followerData = await this.getUserData(followerId);
+      if (followerData) {
+        const newFollowing =
+          followerData.following?.filter((id) => id !== targetUserId) || [];
+        await this.saveUserData(followerId, { following: newFollowing });
+      }
+
+      // Remove followerId from target user's followers list
+      const targetData = await this.getUserData(targetUserId);
+      if (targetData) {
+        const newFollowers =
+          targetData.followers?.filter((id) => id !== followerId) || [];
+        await this.saveUserData(targetUserId, { followers: newFollowers });
+      }
+    } catch (error) {
+      console.error("Error unfollowing user:", error);
+    }
+  },
+
+  async isFollowing(
+    followerId: string,
+    targetUserId: string
+  ): Promise<boolean> {
+    try {
+      const followerData = await this.getUserData(followerId);
+      return followerData?.following?.includes(targetUserId) || false;
+    } catch (error) {
+      console.error("Error checking follow status:", error);
+      return false;
     }
   },
 
